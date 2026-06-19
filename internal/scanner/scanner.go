@@ -6,6 +6,7 @@ package scanner
 import (
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -25,7 +26,7 @@ func Scan(root string) (GroundTruth, error) {
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			// Skip inaccessible paths (permission errors, broken symlinks)
+			fmt.Fprintf(os.Stderr, "warning: skip %s: %v\n", path, err)
 			return nil
 		}
 		if d.IsDir() {

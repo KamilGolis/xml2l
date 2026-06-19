@@ -35,8 +35,8 @@ func TestDecodeBasicProfile(t *testing.T) {
 	if prof.UserLicense != "Salesforce" {
 		t.Errorf("expected UserLicense=Salesforce, got %q", prof.UserLicense)
 	}
-	if prof.HasCustomField != true {
-		t.Error("expected HasCustomField=true")
+	if prof.HasCustomTag != true {
+		t.Error("expected HasCustomTag=true")
 	}
 	if prof.IsCustom != false {
 		t.Error("expected IsCustom=false")
@@ -153,6 +153,8 @@ func TestDecodeMultipleSectionTypes(t *testing.T) {
         <allowRead>true</allowRead>
         <allowEdit>false</allowEdit>
         <allowDelete>false</allowDelete>
+        <modifyAllRecords>false</modifyAllRecords>
+        <viewAllRecords>false</viewAllRecords>
     </objectPermissions>
     <userPermissions>
         <name>APIEnabled</name>
@@ -198,6 +200,12 @@ func TestDecodeMultipleSectionTypes(t *testing.T) {
 		if *op[0].AllowCreate != true || *op[0].AllowRead != true {
 			t.Errorf("expected AllowCreate+AllowRead, got %+v", op[0])
 		}
+		if op[0].ModifyAll == nil || *op[0].ModifyAll != false {
+			t.Errorf("expected ModifyAll=false, got %+v", op[0])
+		}
+		if op[0].ViewAll == nil || *op[0].ViewAll != false {
+			t.Errorf("expected ViewAll=false, got %+v", op[0])
+		}
 	}
 	if up := prof.Sections["userPermissions"]; len(up) == 1 && up[0].Name != "APIEnabled" {
 		t.Errorf("expected APIEnabled, got %q", up[0].Name)
@@ -209,6 +217,37 @@ func TestDecodeMultipleSectionTypes(t *testing.T) {
 		if *av[0].Visible != true || *av[0].Default != false {
 			t.Errorf("expected Visible=true Default=false, got %+v", av[0])
 		}
+	}
+}
+
+func TestDecodePageAccesses(t *testing.T) {
+	xml := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <pageAccesses>
+        <apexPage>MyPage</apexPage>
+        <enabled>true</enabled>
+    </pageAccesses>
+    <userLicense>Salesforce</userLicense>
+</Profile>`
+
+	gt := scanner.GroundTruth{}
+	prof, err := Decode(strings.NewReader(xml), gt)
+	if err != nil {
+		t.Fatalf("Decode failed: %v", err)
+	}
+
+	entries, ok := prof.Sections["pageAccesses"]
+	if !ok {
+		t.Fatal("expected pageAccesses section")
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 pageAccesses entry, got %d", len(entries))
+	}
+	if entries[0].Name != "MyPage" {
+		t.Errorf("expected MyPage, got %q", entries[0].Name)
+	}
+	if entries[0].Enabled == nil || *entries[0].Enabled != true {
+		t.Errorf("expected Enabled=true, got %+v", entries[0])
 	}
 }
 

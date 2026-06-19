@@ -86,10 +86,10 @@ func edgePropertiesLabel(props EdgeProperties) string {
 		parts = append(parts, fmt.Sprintf("allowEdit: %t", *props.AllowEdit))
 	}
 	if props.ModifyAll != nil {
-		parts = append(parts, fmt.Sprintf("modifyAll: %t", *props.ModifyAll))
+		parts = append(parts, fmt.Sprintf("modifyAllRecords: %t", *props.ModifyAll))
 	}
 	if props.ViewAll != nil {
-		parts = append(parts, fmt.Sprintf("viewAll: %t", *props.ViewAll))
+		parts = append(parts, fmt.Sprintf("viewAllRecords: %t", *props.ViewAll))
 	}
 	if props.Default != nil {
 		parts = append(parts, fmt.Sprintf("default: %t", *props.Default))

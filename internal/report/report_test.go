@@ -33,8 +33,8 @@ func addEdge(g *graph.SalesforceGraph, profileName, metaType, name string, props
 
 func TestComputeDiff_BasicMissing(t *testing.T) {
 	g := newTestGraph()
-	addEdge(g, "Admin", "ApexClass", "ClassA", graph.EdgeProperties{Enabled: graph.BoolPtr(true)})
-	addEdge(g, "Customer Service", "ApexClass", "ClassB", graph.EdgeProperties{Enabled: graph.BoolPtr(true)})
+	addEdge(g, "Admin", "ApexClass", "ClassA", graph.EdgeProperties{Enabled: boolPtr(true)})
+	addEdge(g, "Customer Service", "ApexClass", "ClassB", graph.EdgeProperties{Enabled: boolPtr(true)})
 
 	r := ComputeDiff(g, false, "")
 	if len(r.Profiles) != 2 {
@@ -70,8 +70,8 @@ func TestComputeDiff_BasicMissing(t *testing.T) {
 
 func TestComputeDiff_SharedTagSuppressed(t *testing.T) {
 	g := newTestGraph()
-	addEdge(g, "Admin", "ApexClass", "Logger", graph.EdgeProperties{Enabled: graph.BoolPtr(true)})
-	addEdge(g, "Customer Service", "ApexClass", "Logger", graph.EdgeProperties{Enabled: graph.BoolPtr(true)})
+	addEdge(g, "Admin", "ApexClass", "Logger", graph.EdgeProperties{Enabled: boolPtr(true)})
+	addEdge(g, "Customer Service", "ApexClass", "Logger", graph.EdgeProperties{Enabled: boolPtr(true)})
 
 	r := ComputeDiff(g, false, "")
 	// Both profiles have Logger — it's shared, so no missing entries.
@@ -88,8 +88,8 @@ func TestComputeDiff_SharedTagSuppressed(t *testing.T) {
 
 func TestComputeDiff_ValueDifferences(t *testing.T) {
 	g := newTestGraph()
-	addEdge(g, "Admin", "ApexClass", "ClassA", graph.EdgeProperties{Enabled: graph.BoolPtr(true)})
-	addEdge(g, "Customer Service", "ApexClass", "ClassA", graph.EdgeProperties{Enabled: graph.BoolPtr(false)})
+	addEdge(g, "Admin", "ApexClass", "ClassA", graph.EdgeProperties{Enabled: boolPtr(true)})
+	addEdge(g, "Customer Service", "ApexClass", "ClassA", graph.EdgeProperties{Enabled: boolPtr(false)})
 
 	r := ComputeDiff(g, true, "")
 	if len(r.ValueDifferences) == 0 {
@@ -114,10 +114,10 @@ func TestComputeDiff_IdenticalProfiles(t *testing.T) {
 	g := graph.NewGraph()
 	_ = g.AddProfile("Admin", "")
 	_ = g.AddProfile("Clone", "")
-	addEdge(g, "Admin", "ApexClass", "ClassA", graph.EdgeProperties{Enabled: graph.BoolPtr(true)})
-	addEdge(g, "Admin", "ApexClass", "ClassB", graph.EdgeProperties{Enabled: graph.BoolPtr(true)})
-	addEdge(g, "Clone", "ApexClass", "ClassA", graph.EdgeProperties{Enabled: graph.BoolPtr(true)})
-	addEdge(g, "Clone", "ApexClass", "ClassB", graph.EdgeProperties{Enabled: graph.BoolPtr(true)})
+	addEdge(g, "Admin", "ApexClass", "ClassA", graph.EdgeProperties{Enabled: boolPtr(true)})
+	addEdge(g, "Admin", "ApexClass", "ClassB", graph.EdgeProperties{Enabled: boolPtr(true)})
+	addEdge(g, "Clone", "ApexClass", "ClassA", graph.EdgeProperties{Enabled: boolPtr(true)})
+	addEdge(g, "Clone", "ApexClass", "ClassB", graph.EdgeProperties{Enabled: boolPtr(true)})
 
 	r := ComputeDiff(g, false, "")
 	// Identical profiles — nothing missing, all tags shared.
@@ -130,8 +130,8 @@ func TestComputeDiff_DisjointProfiles(t *testing.T) {
 	g := graph.NewGraph()
 	_ = g.AddProfile("A", "")
 	_ = g.AddProfile("B", "")
-	addEdge(g, "A", "ApexClass", "ClassA", graph.EdgeProperties{Enabled: graph.BoolPtr(true)})
-	addEdge(g, "B", "ApexClass", "ClassB", graph.EdgeProperties{Enabled: graph.BoolPtr(true)})
+	addEdge(g, "A", "ApexClass", "ClassA", graph.EdgeProperties{Enabled: boolPtr(true)})
+	addEdge(g, "B", "ApexClass", "ClassB", graph.EdgeProperties{Enabled: boolPtr(true)})
 
 	r := ComputeDiff(g, false, "")
 	if len(r.Profiles) != 2 {
@@ -151,7 +151,7 @@ func TestComputeDiff_DisjointProfiles(t *testing.T) {
 func TestComputeDiff_SingleProfile(t *testing.T) {
 	g := graph.NewGraph()
 	_ = g.AddProfile("Only", "")
-	addEdge(g, "Only", "ApexClass", "ClassA", graph.EdgeProperties{Enabled: graph.BoolPtr(true)})
+	addEdge(g, "Only", "ApexClass", "ClassA", graph.EdgeProperties{Enabled: boolPtr(true)})
 
 	r := ComputeDiff(g, false, "")
 	// Single profile: union == its own edges → no missing entries.
@@ -228,9 +228,9 @@ func TestFormatDiffText_ValueDifferences(t *testing.T) {
 
 func TestComputeDiff_MultipleMetaTypes(t *testing.T) {
 	g := newTestGraph()
-	addEdge(g, "Admin", "ApexClass", "Logger", graph.EdgeProperties{Enabled: graph.BoolPtr(true)})
-	addEdge(g, "Admin", "Field", "Account.Industry", graph.EdgeProperties{Readable: graph.BoolPtr(true), Editable: graph.BoolPtr(true)})
-	addEdge(g, "Customer Service", "ApexClass", "Logger", graph.EdgeProperties{Enabled: graph.BoolPtr(true)})
+	addEdge(g, "Admin", "ApexClass", "Logger", graph.EdgeProperties{Enabled: boolPtr(true)})
+	addEdge(g, "Admin", "Field", "Account.Industry", graph.EdgeProperties{Readable: boolPtr(true), Editable: boolPtr(true)})
+	addEdge(g, "Customer Service", "ApexClass", "Logger", graph.EdgeProperties{Enabled: boolPtr(true)})
 
 	r := ComputeDiff(g, false, "")
 	// Admin has Logger and Account.Industry; Customer Service has only Logger.
@@ -450,7 +450,7 @@ func TestComputeDiff_WithRepoPath(t *testing.T) {
 	_ = g.AddProfile("Admin", "")
 	mn := g.GetOrCreateMetadataNode(graph.MetaTypeApexClass, "TestClass")
 	admin := g.ProfileNodes["Admin"]
-	g.AddEdge(admin, mn, graph.EdgeProperties{Enabled: graph.BoolPtr(true)})
+	g.AddEdge(admin, mn, graph.EdgeProperties{Enabled: boolPtr(true)})
 
 	dir := t.TempDir()
 	mkFile(t, dir, "classes/OtherClass.cls")
@@ -512,3 +512,5 @@ func mkFile(t *testing.T, dir, path string) {
 		t.Fatal(err)
 	}
 }
+
+func boolPtr(b bool) *bool { return &b }

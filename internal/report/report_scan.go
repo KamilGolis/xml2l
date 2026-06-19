@@ -10,12 +10,8 @@ import (
 
 // metaTypeSkipList contains types that have no corresponding filesystem files.
 var metaTypeSkipList = map[string]bool{
-	"UserPermission":        true,
-	"CategoryGroup":         true,
-	"ApexTag":               true,
-	"LoginHours":            true,
-	"LoginIpRange":          true,
-	"ProfileActionOverride": true,
+	"UserPermission": true,
+	"CategoryGroup":  true,
 }
 
 // ScanRepo walks the repository directory under root and collects all metadata files

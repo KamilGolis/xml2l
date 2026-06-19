@@ -60,7 +60,7 @@ func LoadProfiles(projectPath string) (*graph.SalesforceGraph, error) {
 		p.UserLicense = r.Profile.UserLicense
 		p.Description = r.Profile.Description
 		p.IsCustom = r.Profile.IsCustom
-		p.HasCustomField = r.Profile.HasCustomField
+		p.HasCustomTag = r.Profile.HasCustomTag
 
 		// Map section entries to graph edges.
 		for sectionTag, entries := range r.Profile.Sections {

@@ -48,6 +48,11 @@ type userPermEntry struct {
 	Enabled bool   `xml:"enabled"`
 }
 
+type pageAccessEntry struct {
+	ApexPage string `xml:"apexPage"`
+	Enabled  bool   `xml:"enabled"`
+}
+
 // -- Section decoders for name+enabled types
 
 func decodeClassAccesses(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry) error {
@@ -149,5 +154,17 @@ func decodeUserPermissions(decoder *xml.Decoder, se *xml.StartElement, gt scanne
 		return nil
 	}
 	*entries = append(*entries, MetadataEntry{Name: entry.Name, Enabled: BoolPtr(entry.Enabled)})
+	return nil
+}
+
+func decodePageAccesses(decoder *xml.Decoder, se *xml.StartElement, _ scanner.GroundTruth, entries *[]MetadataEntry) error {
+	var entry pageAccessEntry
+	if err := decoder.DecodeElement(&entry, se); err != nil {
+		return err
+	}
+	if entry.ApexPage == "" {
+		return nil
+	}
+	*entries = append(*entries, MetadataEntry{Name: entry.ApexPage, Enabled: BoolPtr(entry.Enabled)})
 	return nil
 }

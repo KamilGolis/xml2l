@@ -157,10 +157,13 @@ func newTestGraph() *SalesforceGraph {
 	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
 
 	cls := g.GetOrCreateMetadataNode(MetaTypeApexClass, "MyClass")
-	g.AddEdge(p, cls, EdgeProperties{Enabled: BoolPtr(true)})
+	enabled := true
+	g.AddEdge(p, cls, EdgeProperties{Enabled: &enabled})
 
 	fld := g.GetOrCreateMetadataNode(MetaTypeField, "Account.Name")
-	g.AddEdge(p, fld, EdgeProperties{Readable: BoolPtr(true), Editable: BoolPtr(false)})
+	readable := true
+	editable := false
+	g.AddEdge(p, fld, EdgeProperties{Readable: &readable, Editable: &editable})
 
 	return g
 }

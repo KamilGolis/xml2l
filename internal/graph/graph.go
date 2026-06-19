@@ -25,20 +25,19 @@ const (
 	MetaTypeAgent                  MetadataType = "Agent"
 	MetaTypeCategoryGroup          MetadataType = "CategoryGroup"
 	MetaTypeExternalDataSource     MetadataType = "ExternalDataSource"
-	MetaTypeLoginFlow              MetadataType = "LoginFlow"
 	MetaTypeServicePresenceStatus  MetadataType = "ServicePresenceStatus"
 	MetaTypeGenComputingSummaryDef MetadataType = "GenComputingSummaryDef"
 )
 
 // ProfileNode represents a single .profile-meta.xml file in the graph.
 type ProfileNode struct {
-	Name           string
-	SourcePath     string
-	UserLicense    string // value of <userLicense>
-	Description    string // value of <description>
-	IsCustom       bool   // value of <custom>; false when tag absent
-	HasCustomField bool   // true when <custom> tag was present (distinguish absent from false)
-	RawXML         string // original XML content for round-trip preservation
+	Name         string
+	SourcePath   string
+	UserLicense  string // value of <userLicense>
+	Description  string // value of <description>
+	IsCustom     bool   // value of <custom>; false when tag absent
+	HasCustomTag bool   // true when <custom> tag was present (distinguish absent from false)
+	RawXML       string // original XML content for round-trip preservation
 }
 
 // MetadataNode represents a permission target that profiles reference.
@@ -164,11 +163,6 @@ func (g *SalesforceGraph) SetMasterSchema(ms MasterSchemaProvider) {
 	g.masterSchema = ms
 }
 
-// BoolPtr is a helper that returns a pointer to the given boolean value.
-func BoolPtr(b bool) *bool {
-	return &b
-}
-
 // -- Canonical metadata type registry
 
 // SectionMeta maps an XML section tag to its corresponding MetadataType.
@@ -188,13 +182,12 @@ var sectionOrder = []SectionMeta{
 	{"customPermissions", MetaTypeCustomPermission},
 	{"customSettingAccesses", MetaTypeCustomSetting},
 	{"externalDataSourceAccesses", MetaTypeExternalDataSource},
-	{"fieldLevelSecurities", MetaTypeField},
 	{"fieldPermissions", MetaTypeField},
 	{"flowAccesses", MetaTypeFlow},
 	{"genComputingSummaryDefAccess", MetaTypeGenComputingSummaryDef},
 	{"layoutAssignments", MetaTypeLayout},
-	{"loginFlows", MetaTypeLoginFlow},
 	{"objectPermissions", MetaTypeObject},
+	{"pageAccesses", MetaTypePage},
 	{"recordTypeVisibilities", MetaTypeRecordType},
 	{"servicePresenceStatusAccesses", MetaTypeServicePresenceStatus},
 	{"tabVisibilities", MetaTypeTab},
@@ -241,6 +234,7 @@ var metaTypeDirMap = map[MetadataType]DirMapping{
 	MetaTypeLayout:             {Dir: "layouts", Patterns: []string{"*.layout"}},
 	MetaTypeCustomPermission:   {Dir: "customPermissions", Patterns: []string{"*.customPermission", "*.customPermission-meta.xml"}},
 	MetaTypeFlow:               {Dir: "flows", Patterns: []string{"*.flow-meta.xml"}},
+	MetaTypePage:               {Dir: "pages", Patterns: []string{"*.page", "*.page-meta.xml"}},
 	MetaTypeObject:             {Dir: "objects", Patterns: []string{"*.object-meta.xml"}},
 	MetaTypeCustomSetting:      {Dir: "objects", Patterns: []string{"*__c.object-meta.xml"}},
 	MetaTypeCustomMetadataType: {Dir: "objects", Patterns: []string{"*__mdt.object-meta.xml"}},

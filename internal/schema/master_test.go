@@ -31,26 +31,39 @@ func TestMasterSchemaMerge(t *testing.T) {
 	ms.merge(prof2)
 
 	// Classes: union of {A, B} + {B, C} = {A, B, C}
-	if len(ms.Classes) != 3 {
-		t.Errorf("expected 3 classes, got %d", len(ms.Classes))
+	classes := ms.AllNames("classAccesses")
+	if len(classes) != 3 {
+		t.Errorf("expected 3 classes, got %d: %v", len(classes), classes)
 	}
 	for _, c := range []string{"ControllerA", "ControllerB", "ControllerC"} {
-		if !ms.Classes[c] {
+		found := false
+		for _, name := range classes {
+			if name == c {
+				found = true
+				break
+			}
+		}
+		if !found {
 			t.Errorf("missing class %q", c)
 		}
 	}
 
 	// Fields: {Account.Revenue__c}
-	if len(ms.Fields) != 1 {
-		t.Errorf("expected 1 field, got %d", len(ms.Fields))
+	fields := ms.AllNames("fieldPermissions")
+	if len(fields) != 1 {
+		t.Errorf("expected 1 field, got %d", len(fields))
 	}
-	if !ms.Fields["Account.Revenue__c"] {
-		t.Error("missing field Account.Revenue__c")
+	if fields[0] != "Account.Revenue__c" {
+		t.Errorf("missing field Account.Revenue__c, got %v", fields)
 	}
 
 	// Objects: {Account}
-	if len(ms.Objects) != 1 {
-		t.Errorf("expected 1 object, got %d", len(ms.Objects))
+	objects := ms.AllNames("objectPermissions")
+	if len(objects) != 1 {
+		t.Errorf("expected 1 object, got %d", len(objects))
+	}
+	if objects[0] != "Account" {
+		t.Errorf("missing object Account, got %v", objects)
 	}
 }
 
@@ -77,19 +90,20 @@ func TestMasterSchemaConcurrentMergeNoRace(t *testing.T) {
 
 	wg.Wait()
 
-	// All 10 unique classes should be present.
-	if len(ms.Classes) != 11 { // 10 unique + 1 shared
-		t.Errorf("expected 11 classes (10 unique + 1 shared), got %d", len(ms.Classes))
+	// All 10 unique classes + 1 shared = 11 classes.
+	classes := ms.AllNames("classAccesses")
+	if len(classes) != 11 {
+		t.Errorf("expected 11 classes (10 unique + 1 shared), got %d", len(classes))
 	}
 }
 
 func TestPreAllocatedSliceCapacity(t *testing.T) {
 	ms := NewMasterSchema()
-	ms.Classes["A"] = true
-	ms.Classes["B"] = true
-	ms.Classes["C"] = true
+	ms.entries["classAccesses"]["A"] = true
+	ms.entries["classAccesses"]["B"] = true
+	ms.entries["classAccesses"]["C"] = true
 
-	all := ms.AllClasses()
+	all := ms.AllNames("classAccesses")
 	if len(all) != 3 {
 		t.Errorf("expected 3 classes, got %d", len(all))
 	}
@@ -139,11 +153,13 @@ func TestRunConcurrentUnion(t *testing.T) {
 	}
 
 	// Verify Master Schema union.
-	if len(ms.Classes) != 3 {
-		t.Errorf("expected 3 unique classes (A+B+C), got %d", len(ms.Classes))
+	classes := ms.AllNames("classAccesses")
+	if len(classes) != 3 {
+		t.Errorf("expected 3 unique classes (A+B+C), got %d", len(classes))
 	}
-	if len(ms.Fields) != 2 {
-		t.Errorf("expected 2 unique fields (F1+F2), got %d", len(ms.Fields))
+	fields := ms.AllNames("fieldPermissions")
+	if len(fields) != 2 {
+		t.Errorf("expected 2 unique fields (F1+F2), got %d", len(fields))
 	}
 }
 
@@ -165,18 +181,18 @@ func TestProfilePreAllocationScenarios(t *testing.T) {
 		ms := NewMasterSchema()
 		for i := 0; i < 100; i++ {
 			name := string(rune('A' + i))
-			ms.Classes[name] = true
+			ms.entries["classAccesses"][name] = true
 		}
-		all := ms.AllClasses()
+		all := ms.AllNames("classAccesses")
 		if cap(all) != 100 {
 			t.Errorf("expected cap 100, got %d", cap(all))
 		}
 	})
 	t.Run("fields slice pre-allocated", func(t *testing.T) {
 		ms := NewMasterSchema()
-		ms.Fields["a"] = true
-		ms.Fields["b"] = true
-		all := ms.AllFields()
+		ms.entries["fieldPermissions"]["a"] = true
+		ms.entries["fieldPermissions"]["b"] = true
+		all := ms.AllNames("fieldPermissions")
 		if cap(all) != 2 {
 			t.Errorf("expected cap 2, got %d", cap(all))
 		}
