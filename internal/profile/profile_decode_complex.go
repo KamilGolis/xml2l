@@ -24,20 +24,14 @@ type layoutEntry struct {
 	RecordType string `xml:"recordType"`
 }
 
-type loginFlowEntry struct {
-	FlowType    string `xml:"flowType"`
-	UserLicense string `xml:"userLicense"`
-	Flow        string `xml:"flow"`
-}
-
 type objectPermEntry struct {
 	Object         string `xml:"object"`
 	AllowCreate    *bool  `xml:"allowCreate"`
 	AllowDelete    *bool  `xml:"allowDelete"`
 	AllowRead      *bool  `xml:"allowRead"`
 	AllowEdit      *bool  `xml:"allowEdit"`
-	AllowModifyAll *bool  `xml:"allowModifyAll"`
-	ViewAll        *bool  `xml:"viewAll"`
+	AllowModifyAll *bool  `xml:"modifyAllRecords"`
+	ViewAll        *bool  `xml:"viewAllRecords"`
 }
 
 type recordTypeEntry struct {
@@ -100,18 +94,6 @@ func decodeLayoutAssignments(decoder *xml.Decoder, se *xml.StartElement, gt scan
 		return nil
 	}
 	*entries = append(*entries, MetadataEntry{Name: entry.Layout, RecordType: &entry.RecordType})
-	return nil
-}
-
-func decodeLoginFlows(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry) error {
-	var entry loginFlowEntry
-	if err := decoder.DecodeElement(&entry, se); err != nil {
-		return err
-	}
-	if entry.Flow == "" {
-		return nil
-	}
-	*entries = append(*entries, MetadataEntry{Name: entry.Flow})
 	return nil
 }
 

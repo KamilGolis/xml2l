@@ -3,6 +3,8 @@
 package report
 
 import (
+	"sort"
+
 	"xml2l/internal/graph"
 )
 
@@ -60,6 +62,12 @@ func ComputeDiff(g *graph.SalesforceGraph, details bool, repoPath string) *DiffR
 		return &DiffReport{}
 	}
 
+	// Sort profile nodes by name for deterministic output.
+	profileNodes := g.Profiles()
+	sort.Slice(profileNodes, func(i, j int) bool {
+		return profileNodes[i].Name < profileNodes[j].Name
+	})
+
 	// Collect the set of all (metaType, name) keys across all profiles.
 	type metaKey struct {
 		metaType string
@@ -81,7 +89,7 @@ func ComputeDiff(g *graph.SalesforceGraph, details bool, repoPath string) *DiffR
 	sharedKeys := make(map[metaKey]bool)
 	for key := range allKeys {
 		presentInAll := true
-		for _, pn := range g.ProfileNodes {
+		for _, pn := range profileNodes {
 			if !profileKeys[pn][key] {
 				presentInAll = false
 				break
@@ -96,7 +104,7 @@ func ComputeDiff(g *graph.SalesforceGraph, details bool, repoPath string) *DiffR
 	var profiles []ProfileMissing
 	var valueDiffs []ValueDiff
 
-	for _, pn := range g.ProfileNodes {
+	for _, pn := range profileNodes {
 		have := profileKeys[pn]
 		var missing []metaKey
 		for key := range allKeys {
@@ -111,27 +119,40 @@ func ComputeDiff(g *graph.SalesforceGraph, details bool, repoPath string) *DiffR
 		for _, m := range missing {
 			pm.Missing[m.metaType] = append(pm.Missing[m.metaType], m.name)
 		}
+		// Sort element lists for deterministic output.
+		for _, elements := range pm.Missing {
+			sort.Strings(elements)
+		}
 		profiles = append(profiles, pm)
 	}
 
 	// Value differences for shared tags (when details=true).
-	if details && len(g.ProfileNodes) >= 2 {
-		for key := range sharedKeys {
+	if details && len(profileNodes) >= 2 {
+		// Sort sharedKeys for deterministic iteration.
+		sortedSharedKeys := make([]metaKey, 0, len(sharedKeys))
+		for k := range sharedKeys {
+			sortedSharedKeys = append(sortedSharedKeys, k)
+		}
+		sort.Slice(sortedSharedKeys, func(i, j int) bool {
+			if sortedSharedKeys[i].metaType != sortedSharedKeys[j].metaType {
+				return sortedSharedKeys[i].metaType < sortedSharedKeys[j].metaType
+			}
+			return sortedSharedKeys[i].name < sortedSharedKeys[j].name
+		})
+
+		for _, key := range sortedSharedKeys {
 			// Find Admin profile to use as base; fallback to any profile if no Admin found.
 			var baseProf *graph.ProfileNode
-			for _, pn := range g.ProfileNodes {
+			for _, pn := range profileNodes {
 				if pn.Name == "Admin" {
 					baseProf = pn
 					break
 				}
 			}
 			if baseProf == nil {
-				for _, pn := range g.ProfileNodes {
-					baseProf = pn
-					break
-				}
+				baseProf = profileNodes[0]
 			}
-			if baseProf == nil || len(g.ProfileNodes) < 2 {
+			if baseProf == nil || len(profileNodes) < 2 {
 				continue
 			}
 
@@ -147,7 +168,7 @@ func ComputeDiff(g *graph.SalesforceGraph, details bool, repoPath string) *DiffR
 			}
 
 			baseName := baseProf.Name
-			for _, pn := range g.ProfileNodes {
+			for _, pn := range profileNodes {
 				if pn.Name == baseName {
 					continue
 				}
@@ -175,6 +196,20 @@ func ComputeDiff(g *graph.SalesforceGraph, details bool, repoPath string) *DiffR
 			}
 		}
 	}
+
+	// Sort value diffs for deterministic output.
+	sort.Slice(valueDiffs, func(i, j int) bool {
+		if valueDiffs[i].MetaType != valueDiffs[j].MetaType {
+			return valueDiffs[i].MetaType < valueDiffs[j].MetaType
+		}
+		if valueDiffs[i].Name != valueDiffs[j].Name {
+			return valueDiffs[i].Name < valueDiffs[j].Name
+		}
+		if valueDiffs[i].ProfileA != valueDiffs[j].ProfileA {
+			return valueDiffs[i].ProfileA < valueDiffs[j].ProfileA
+		}
+		return valueDiffs[i].ProfileB < valueDiffs[j].ProfileB
+	})
 
 	r := &DiffReport{
 		Profiles:         profiles,
@@ -221,10 +256,10 @@ func compareProps(a, b graph.EdgeProperties) []propDiff {
 	if diff := boolDiff("allowEdit", a.AllowEdit, b.AllowEdit); diff != nil {
 		diffs = append(diffs, *diff)
 	}
-	if diff := boolDiff("modifyAll", a.ModifyAll, b.ModifyAll); diff != nil {
+	if diff := boolDiff("modifyAllRecords", a.ModifyAll, b.ModifyAll); diff != nil {
 		diffs = append(diffs, *diff)
 	}
-	if diff := boolDiff("viewAll", a.ViewAll, b.ViewAll); diff != nil {
+	if diff := boolDiff("viewAllRecords", a.ViewAll, b.ViewAll); diff != nil {
 		diffs = append(diffs, *diff)
 	}
 	if diff := boolDiff("default", a.Default, b.Default); diff != nil {

@@ -15,6 +15,11 @@ func FormatDiffText(r *DiffReport) string {
 
 	var b strings.Builder
 
+	// Sort profiles by name for deterministic output.
+	sort.Slice(r.Profiles, func(i, j int) bool {
+		return r.Profiles[i].ProfileName < r.Profiles[j].ProfileName
+	})
+
 	for _, pm := range r.Profiles {
 		fmt.Fprintf(&b, "[%s]\n", pm.ProfileName)
 
@@ -65,12 +70,6 @@ func FormatDiffText(r *DiffReport) string {
 			if len(r.CrossRef.MissingFiles) > 0 {
 				fmt.Fprintln(&b, "[Missing Files]")
 				fmt.Fprintln(&b, "  Metadata in profiles but not found in repository:")
-				sort.Slice(r.CrossRef.MissingFiles, func(i, j int) bool {
-					if r.CrossRef.MissingFiles[i].MetaType != r.CrossRef.MissingFiles[j].MetaType {
-						return r.CrossRef.MissingFiles[i].MetaType < r.CrossRef.MissingFiles[j].MetaType
-					}
-					return r.CrossRef.MissingFiles[i].Name < r.CrossRef.MissingFiles[j].Name
-				})
 				for _, entry := range r.CrossRef.MissingFiles {
 					line := fmt.Sprintf("    %s/%s", entry.MetaType, entry.Name)
 					fmt.Fprintln(&b, line)
@@ -83,12 +82,6 @@ func FormatDiffText(r *DiffReport) string {
 				}
 				fmt.Fprintln(&b, "[Unreferenced Metadata]")
 				fmt.Fprintln(&b, "  Files in repository but not referenced by any profile:")
-				sort.Slice(r.CrossRef.Unreferenced, func(i, j int) bool {
-					if r.CrossRef.Unreferenced[i].MetaType != r.CrossRef.Unreferenced[j].MetaType {
-						return r.CrossRef.Unreferenced[i].MetaType < r.CrossRef.Unreferenced[j].MetaType
-					}
-					return r.CrossRef.Unreferenced[i].Name < r.CrossRef.Unreferenced[j].Name
-				})
 				for _, entry := range r.CrossRef.Unreferenced {
 					line := fmt.Sprintf("    %s/%s", entry.MetaType, entry.Name)
 					fmt.Fprintln(&b, line)

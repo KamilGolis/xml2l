@@ -51,7 +51,8 @@ func TestDefaultEdgeProperties(t *testing.T) {
 
 func TestMarshalEntry(t *testing.T) {
 	t.Run("class access", func(t *testing.T) {
-		p := graph.EdgeProperties{Enabled: graph.BoolPtr(true)}
+		enabled := true
+		p := graph.EdgeProperties{Enabled: &enabled}
 		out, err := marshalEntry("classAccesses", "MyClass", p)
 		if err != nil {
 			t.Fatal(err)
@@ -89,14 +90,47 @@ func TestMarshalEntry(t *testing.T) {
 			t.Errorf("expected visibility=DefaultOn: %s", out)
 		}
 	})
+
+	t.Run("object permissions with correct tags", func(t *testing.T) {
+		p := graph.EdgeProperties{
+			AllowCreate: &[]bool{true}[0], AllowRead: &[]bool{true}[0],
+			AllowEdit: &[]bool{false}[0], AllowDelete: &[]bool{false}[0],
+			ModifyAll: &[]bool{false}[0], ViewAll: &[]bool{false}[0],
+		}
+		out, err := marshalEntry("objectPermissions", "Account", p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(out), "<modifyAllRecords>false</modifyAllRecords>") {
+			t.Errorf("expected modifyAllRecords=false, got: %s", out)
+		}
+		if !strings.Contains(string(out), "<viewAllRecords>false</viewAllRecords>") {
+			t.Errorf("expected viewAllRecords=false, got: %s", out)
+		}
+	})
+
+	t.Run("page access", func(t *testing.T) {
+		enabled := true
+		p := graph.EdgeProperties{Enabled: &enabled}
+		out, err := marshalEntry("pageAccesses", "MyPage", p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(out), "<apexPage>MyPage</apexPage>") {
+			t.Errorf("missing apexPage in output: %s", out)
+		}
+		if !strings.Contains(string(out), "<enabled>true</enabled>") {
+			t.Errorf("missing enabled=true in output: %s", out)
+		}
+	})
 }
 
 func TestNormalizeProfileBackfill(t *testing.T) {
 	ms := schema.NewMasterSchema()
-	ms.Fields["Account.Revenue__c"] = true
-	ms.Fields["Account.Existing__c"] = true
-	ms.Classes["ClassA"] = true
-	ms.Classes["ClassB"] = true
+	ms.Add("fieldPermissions", "Account.Revenue__c")
+	ms.Add("fieldPermissions", "Account.Existing__c")
+	ms.Add("classAccesses", "ClassA")
+	ms.Add("classAccesses", "ClassB")
 
 	g := graph.NewGraph()
 	g.SetMasterSchema(ms)
@@ -105,8 +139,8 @@ func TestNormalizeProfileBackfill(t *testing.T) {
 	// Profile has Existing__c and ClassA, but NOT Revenue__c or ClassB.
 	fieldNode := g.GetOrCreateMetadataNode(graph.MetaTypeField, "Account.Existing__c")
 	classNode := g.GetOrCreateMetadataNode(graph.MetaTypeApexClass, "ClassA")
-	g.AddEdge(p, fieldNode, graph.EdgeProperties{Readable: graph.BoolPtr(true), Editable: graph.BoolPtr(true)})
-	g.AddEdge(p, classNode, graph.EdgeProperties{Enabled: graph.BoolPtr(true)})
+	g.AddEdge(p, fieldNode, graph.EdgeProperties{Readable: boolPtr(true), Editable: boolPtr(true)})
+	g.AddEdge(p, classNode, graph.EdgeProperties{Enabled: boolPtr(true)})
 
 	xmlBytes := NormalizeProfile(p, g)
 	output := string(xmlBytes)
@@ -151,31 +185,6 @@ func TestNormalizeProfileXMLHeader(t *testing.T) {
 	}
 }
 
-func TestNormalizeProfileAlphabeticalSort(t *testing.T) {
-	ms := schema.NewMasterSchema()
-	ms.Fields["ZField"] = true
-	ms.Fields["AField"] = true
-	ms.Fields["MField"] = true
-
-	g := graph.NewGraph()
-	g.SetMasterSchema(ms)
-	p := g.AddProfile("Admin", "test.profile-meta.xml")
-
-	xmlBytes := NormalizeProfile(p, g)
-
-	// Check that fields appear in alphabetical order.
-	aPos := bytes.Index(xmlBytes, []byte("AField"))
-	mPos := bytes.Index(xmlBytes, []byte("MField"))
-	zPos := bytes.Index(xmlBytes, []byte("ZField"))
-
-	if aPos < 0 || mPos < 0 || zPos < 0 {
-		t.Fatal("missing expected field entries")
-	}
-	if !(aPos < mPos && mPos < zPos) {
-		t.Error("fields not in alphabetical order: A < M < Z expected")
-	}
-}
-
 func TestExtractUnmappedSections(t *testing.T) {
 	rawXML := `<?xml version="1.0"?>
 <Profile xmlns="http://soap.sforce.com/2006/04/metadata">
@@ -186,6 +195,14 @@ func TestExtractUnmappedSections(t *testing.T) {
     <loginIpRanges>
         <startAddress>10.0.0.0</startAddress>
     </loginIpRanges>
+    <loginIpRanges>
+        <startAddress>10.0.0.1</startAddress>
+    </loginIpRanges>
+    <loginFlows>
+        <flowType>LoginFlow</flowType>
+        <userLicense>Salesforce</userLicense>
+        <flow>MyFlow</flow>
+    </loginFlows>
     <profileActionOverrides>
         <actionName>Tab</actionName>
     </profileActionOverrides>
@@ -199,11 +216,21 @@ func TestExtractUnmappedSections(t *testing.T) {
 	if !strings.Contains(unmapped, "loginIpRanges") {
 		t.Error("missing loginIpRanges")
 	}
+	if !strings.Contains(unmapped, "loginFlows") {
+		t.Error("missing loginFlows")
+	}
 	if !strings.Contains(unmapped, "profileActionOverrides") {
 		t.Error("missing profileActionOverrides")
 	}
 	if !strings.Contains(unmapped, "Monday") {
 		t.Error("missing loginHours content")
+	}
+	// Verify both loginIpRanges entries are preserved.
+	if strings.Count(unmapped, "    <loginIpRanges>") != 2 {
+		t.Errorf("expected 2 loginIpRanges entries, got %d", strings.Count(unmapped, "    <loginIpRanges>"))
+	}
+	if !strings.Contains(unmapped, "MyFlow") {
+		t.Error("missing loginFlows content")
 	}
 }
 
@@ -245,9 +272,41 @@ func TestNormalizeProfilePreservesLoginHours(t *testing.T) {
 	}
 }
 
+func TestNormalizeProfilePreservesLoginFlows(t *testing.T) {
+	rawXML := `<?xml version="1.0"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <loginFlows>
+        <flowType>LoginFlow</flowType>
+        <userLicense>Salesforce</userLicense>
+        <flow>TestFlow</flow>
+    </loginFlows>
+    <userLicense>Salesforce</userLicense>
+</Profile>`
+
+	ms := schema.NewMasterSchema()
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+	p := g.AddProfile("Admin", "test.profile-meta.xml")
+	p.RawXML = rawXML
+	p.UserLicense = "Salesforce"
+
+	xmlBytes := NormalizeProfile(p, g)
+	output := string(xmlBytes)
+
+	if !strings.Contains(output, "loginFlows") {
+		t.Error("loginFlows section was not preserved")
+	}
+	if !strings.Contains(output, "LoginFlow") {
+		t.Error("loginFlows flowType was not preserved")
+	}
+	if !strings.Contains(output, "TestFlow") {
+		t.Error("loginFlows flow was not preserved")
+	}
+}
+
 func TestWriteProfiles(t *testing.T) {
 	ms := schema.NewMasterSchema()
-	ms.Classes["TestClass"] = true
+	ms.Add("classAccesses", "TestClass")
 
 	g := graph.NewGraph()
 	g.SetMasterSchema(ms)
@@ -266,9 +325,9 @@ func TestWriteProfiles(t *testing.T) {
 // Verify the output is valid XML by round-tripping through xml.Decoder.
 func TestNormalizeProfileValidXML(t *testing.T) {
 	ms := schema.NewMasterSchema()
-	ms.Fields["A.Test"] = true
-	ms.Fields["B.Test"] = true
-	ms.Classes["MyClass"] = true
+	ms.Add("fieldPermissions", "A.Test")
+	ms.Add("fieldPermissions", "B.Test")
+	ms.Add("classAccesses", "MyClass")
 
 	g := graph.NewGraph()
 	g.SetMasterSchema(ms)
@@ -295,8 +354,8 @@ func TestNormalizeProfileValidXML(t *testing.T) {
 
 func TestNormalizeProfileTabVisBackfillNoEmptyTag(t *testing.T) {
 	ms := schema.NewMasterSchema()
-	ms.Tabs["standard-Account"] = true
-	ms.Fields["A.Field"] = true // add a field so something produces edges
+	ms.Add("tabVisibilities", "standard-Account")
+	ms.Add("fieldPermissions", "A.Field") // add a field so something produces edges
 
 	g := graph.NewGraph()
 	g.SetMasterSchema(ms)
@@ -319,4 +378,31 @@ func TestNormalizeProfileTabVisBackfillNoEmptyTag(t *testing.T) {
 	}
 }
 
+func TestNormalizeProfileAlphabeticalSort(t *testing.T) {
+	ms := schema.NewMasterSchema()
+	ms.Add("fieldPermissions", "ZField")
+	ms.Add("fieldPermissions", "AField")
+	ms.Add("fieldPermissions", "MField")
+
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+	p := g.AddProfile("Admin", "test.profile-meta.xml")
+
+	xmlBytes := NormalizeProfile(p, g)
+
+	// Check that fields appear in alphabetical order.
+	aPos := bytes.Index(xmlBytes, []byte("AField"))
+	mPos := bytes.Index(xmlBytes, []byte("MField"))
+	zPos := bytes.Index(xmlBytes, []byte("ZField"))
+
+	if aPos < 0 || mPos < 0 || zPos < 0 {
+		t.Fatal("missing expected field entries")
+	}
+	if !(aPos < mPos && mPos < zPos) {
+		t.Error("fields not in alphabetical order: A < M < Z expected")
+	}
+}
+
 func strPtr(s string) *string { return &s }
+
+func boolPtr(b bool) *bool { return &b }

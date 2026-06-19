@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"runtime"
 	"sync"
 
 	"xml2l/internal/profile"
@@ -34,11 +35,22 @@ func RunConcurrent(paths []string, gt scanner.GroundTruth) ([]AggregateResult, *
 	var wg sync.WaitGroup
 	results := make(chan jobResult, len(paths))
 
-	// Fan-out: decode each profile concurrently.
+	// Fan-out: decode each profile concurrently with bounded parallelism.
+	maxWorkers := runtime.NumCPU()
+	if maxWorkers > len(paths) {
+		maxWorkers = len(paths)
+	}
+	if maxWorkers < 1 {
+		maxWorkers = 1
+	}
+	sem := make(chan struct{}, maxWorkers)
+
 	for i, path := range paths {
 		wg.Add(1)
+		sem <- struct{}{}
 		go func(idx int, filePath string) {
 			defer wg.Done()
+			defer func() { <-sem }()
 
 			raw, err := os.ReadFile(filePath)
 			if err != nil {

@@ -15,6 +15,13 @@ import (
 	"xml2l/internal/graph"
 )
 
+var (
+	reLoginHours       = regexp.MustCompile(`(?s)<loginHours>.*?</loginHours>`)
+	reLoginIpRanges    = regexp.MustCompile(`(?s)<loginIpRanges>.*?</loginIpRanges>`)
+	reLoginFlows       = regexp.MustCompile(`(?s)<loginFlows>.*?</loginFlows>`)
+	reProfileActionOvr = regexp.MustCompile(`(?s)<profileActionOverrides>.*?</profileActionOverrides>`)
+)
+
 // -- XML marshaling structs for each section type.
 
 type classAccessXML struct {
@@ -67,23 +74,10 @@ type fieldPermXML struct {
 	Editable bool     `xml:"editable"`
 }
 
-type fieldLevelSecXML struct {
-	XMLName xml.Name `xml:"fieldLevelSecurities"`
-	Field   string   `xml:"field"`
-	Hidden  bool     `xml:"hidden"`
-}
-
 type layoutXML struct {
 	XMLName    xml.Name `xml:"layoutAssignments"`
 	Layout     string   `xml:"layout"`
 	RecordType string   `xml:"recordType,omitempty"`
-}
-
-type loginFlowXML struct {
-	XMLName     xml.Name `xml:"loginFlows"`
-	FlowType    string   `xml:"flowType"`
-	UserLicense string   `xml:"userLicense"`
-	Flow        string   `xml:"flow"`
 }
 
 type objectPermXML struct {
@@ -93,8 +87,8 @@ type objectPermXML struct {
 	AllowDelete bool     `xml:"allowDelete"`
 	AllowRead   bool     `xml:"allowRead"`
 	AllowEdit   bool     `xml:"allowEdit"`
-	ModifyAll   bool     `xml:"allowModifyAll"`
-	ViewAll     bool     `xml:"viewAll"`
+	ModifyAll   bool     `xml:"modifyAllRecords"`
+	ViewAll     bool     `xml:"viewAllRecords"`
 }
 
 type recordTypeXML struct {
@@ -120,6 +114,12 @@ type userPermXML struct {
 	XMLName xml.Name `xml:"userPermissions"`
 	Name    string   `xml:"name"`
 	Enabled bool     `xml:"enabled"`
+}
+
+type pageAccessXML struct {
+	XMLName  xml.Name `xml:"pageAccesses"`
+	ApexPage string   `xml:"apexPage"`
+	Enabled  bool     `xml:"enabled"`
 }
 
 type flowAccessXML struct {
@@ -150,17 +150,6 @@ type NormalizeGraph interface {
 	MasterSchema() graph.MasterSchemaProvider
 }
 
-// profileNames returns all metadata names from the profile for a given section tag.
-func profileNames(p *graph.ProfileNode, g NormalizeGraph, metaType graph.MetadataType) map[string]bool {
-	result := make(map[string]bool)
-	for _, e := range g.ProfileEdges(p) {
-		if e.MetadataNode.MetaType == metaType {
-			result[e.MetadataNode.Name] = true
-		}
-	}
-	return result
-}
-
 // -- DefaultEdgeProperties
 
 // DefaultEdgeProperties returns an EdgeProperties with all boolean fields set to false
@@ -174,7 +163,7 @@ func DefaultEdgeProperties(mt graph.MetadataType) graph.EdgeProperties {
 		graph.MetaTypeCustomPermission, graph.MetaTypeCustomSetting,
 		graph.MetaTypeExternalDataSource, graph.MetaTypeFlow,
 		graph.MetaTypeGenComputingSummaryDef, graph.MetaTypeServicePresenceStatus,
-		graph.MetaTypeUserPerm:
+		graph.MetaTypeUserPerm, graph.MetaTypePage:
 		return graph.EdgeProperties{Enabled: &f}
 	case graph.MetaTypeApp, graph.MetaTypeRecordType:
 		return graph.EdgeProperties{Visible: &f, Default: &f}
@@ -185,8 +174,7 @@ func DefaultEdgeProperties(mt graph.MetadataType) graph.EdgeProperties {
 			AllowCreate: &f, AllowDelete: &f, AllowRead: &f, AllowEdit: &f,
 			ModifyAll: &f, ViewAll: &f,
 		}
-	case graph.MetaTypeCategoryGroup, graph.MetaTypeLoginFlow, graph.MetaTypeLayout:
-		// TODO: String-enum and unstructured sections — no boolean defaults to set. Get default values here.
+	case graph.MetaTypeCategoryGroup, graph.MetaTypeLayout:
 		return graph.EdgeProperties{}
 	case graph.MetaTypeTab:
 		return graph.EdgeProperties{Visibility: &s}
@@ -213,28 +201,32 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 	// Profile-level fields.
 	writeProfileFields(&buf, p)
 
+	// Pre-group edges by MetadataType so the per-section loop doesn't
+	// iterate all edges for every section type (O(sections × edges) → O(edges + sections)).
+	type nameAndProps struct {
+		name  string
+		props graph.EdgeProperties
+	}
+	edgesByType := make(map[graph.MetadataType][]nameAndProps)
+	for _, e := range g.ProfileEdges(p) {
+		edgesByType[e.MetadataNode.MetaType] = append(edgesByType[e.MetadataNode.MetaType], nameAndProps{
+			name:  e.MetadataNode.Name,
+			props: e.Properties,
+		})
+	}
+
 	// Process each section type in stable order.
 	for _, sm := range graph.SectionMetaOrder() {
 		sectionTag := sm.Tag
 		metaType := sm.MetaType
 
-		// Collect existing edges for this profile + section type.
-		type nameAndProps struct {
-			name  string
-			props graph.EdgeProperties
+		sectionEntries := edgesByType[metaType]
+		existing := make(map[string]bool, len(sectionEntries))
+		for _, e := range sectionEntries {
+			existing[e.name] = true
 		}
-
-		existing := profileNames(p, g, metaType)
-		var entries []nameAndProps
-
-		for _, e := range g.ProfileEdges(p) {
-			if e.MetadataNode.MetaType == metaType {
-				entries = append(entries, nameAndProps{
-					name:  e.MetadataNode.Name,
-					props: e.Properties,
-				})
-			}
-		}
+		entries := make([]nameAndProps, 0, len(sectionEntries))
+		entries = append(entries, sectionEntries...)
 
 		// Backfill: add Master Schema entries missing from this profile.
 		msNamesList := g.MasterSchema().AllNames(sectionTag)
@@ -267,7 +259,7 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 		}
 	}
 
-	// Append unmapped sections (loginHours, loginIpRanges, profileActionOverrides).
+	// Append unmapped sections.
 	unmapped := extractUnmappedSections(p.RawXML)
 	buf.WriteString(unmapped)
 
@@ -280,7 +272,7 @@ func writeProfileFields(buf *bytes.Buffer, p *graph.ProfileNode) {
 	if p.UserLicense != "" {
 		buf.WriteString("    <userLicense>" + xmlEscape(p.UserLicense) + "</userLicense>\n")
 	}
-	if p.HasCustomField {
+	if p.HasCustomTag {
 		val := "false"
 		if p.IsCustom {
 			val = "true"
@@ -324,8 +316,6 @@ func marshalEntry(sectionTag, name string, props graph.EdgeProperties) ([]byte, 
 		v = customSettingAccessXML{Name: name, Enabled: boolVal(props.Enabled)}
 	case "fieldPermissions":
 		v = fieldPermXML{Field: name, Readable: boolVal(props.Readable), Editable: boolVal(props.Editable)}
-	case "fieldLevelSecurities":
-		v = fieldLevelSecXML{Field: name, Hidden: boolVal(props.Hidden)}
 	case "flowAccesses":
 		v = flowAccessXML{Flow: name, Enabled: boolVal(props.Enabled)}
 	case "genComputingSummaryDefAccess":
@@ -338,8 +328,6 @@ func marshalEntry(sectionTag, name string, props graph.EdgeProperties) ([]byte, 
 			rt = *props.RecordType
 		}
 		v = layoutXML{Layout: name, RecordType: rt}
-	case "loginFlows":
-		v = loginFlowXML{Flow: name}
 	case "objectPermissions":
 		v = objectPermXML{
 			Object:      name,
@@ -347,6 +335,8 @@ func marshalEntry(sectionTag, name string, props graph.EdgeProperties) ([]byte, 
 			AllowRead: boolVal(props.AllowRead), AllowEdit: boolVal(props.AllowEdit),
 			ModifyAll: boolVal(props.ModifyAll), ViewAll: boolVal(props.ViewAll),
 		}
+	case "pageAccesses":
+		v = pageAccessXML{ApexPage: name, Enabled: boolVal(props.Enabled)}
 	case "recordTypeVisibilities":
 		v = recordTypeXML{RecordType: name, Visible: boolVal(props.Visible), Default: boolVal(props.Default)}
 	case "servicePresenceStatusAccesses":
@@ -383,33 +373,18 @@ func strVal(s *string) string {
 	return *s
 }
 
-// extractUnmappedSections extracts loginHours, loginIpRanges, and
-// profileActionOverrides from raw XML for preservation.
+// extractUnmappedSections extracts unmapped sections from raw XML for preservation.
+// These sections are not modeled in the graph but must be preserved verbatim.
 func extractUnmappedSections(rawXML string) string {
 	if rawXML == "" {
 		return ""
 	}
-
 	var result strings.Builder
-
-	// Extract loginHours.
-	re := regexp.MustCompile(`(?s)<loginHours>.*?</loginHours>`)
-	if m := re.FindString(rawXML); m != "" {
-		result.WriteString(indentXMLSection(m))
+	for _, re := range []*regexp.Regexp{reLoginHours, reLoginIpRanges, reLoginFlows, reProfileActionOvr} {
+		for _, m := range re.FindAllString(rawXML, -1) {
+			result.WriteString(indentXMLSection(m))
+		}
 	}
-
-	// Extract loginIpRanges.
-	re = regexp.MustCompile(`(?s)<loginIpRanges>.*?</loginIpRanges>`)
-	if m := re.FindString(rawXML); m != "" {
-		result.WriteString(indentXMLSection(m))
-	}
-
-	// Extract profileActionOverrides.
-	re = regexp.MustCompile(`(?s)<profileActionOverrides>.*?</profileActionOverrides>`)
-	if m := re.FindString(rawXML); m != "" {
-		result.WriteString(indentXMLSection(m))
-	}
-
 	return strings.TrimSpace(result.String())
 }
 

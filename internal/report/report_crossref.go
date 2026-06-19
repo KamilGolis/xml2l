@@ -1,6 +1,7 @@
 package report
 
 import (
+	"sort"
 	"strings"
 
 	"xml2l/internal/graph"
@@ -55,11 +56,26 @@ func CrossReference(g *graph.SalesforceGraph, repoFiles map[string]map[string]bo
 		}
 	}
 
+	// Sort for deterministic output.
+	sort.Slice(xr.MissingFiles, func(i, j int) bool {
+		if xr.MissingFiles[i].MetaType != xr.MissingFiles[j].MetaType {
+			return xr.MissingFiles[i].MetaType < xr.MissingFiles[j].MetaType
+		}
+		return xr.MissingFiles[i].Name < xr.MissingFiles[j].Name
+	})
+	sort.Slice(xr.Unreferenced, func(i, j int) bool {
+		if xr.Unreferenced[i].MetaType != xr.Unreferenced[j].MetaType {
+			return xr.Unreferenced[i].MetaType < xr.Unreferenced[j].MetaType
+		}
+		return xr.Unreferenced[i].Name < xr.Unreferenced[j].Name
+	})
+
 	// Build skipped-types note.
 	var skipped []string
 	for mt := range metaTypeSkipList {
 		skipped = append(skipped, mt)
 	}
+	sort.Strings(skipped)
 	if len(skipped) > 0 {
 		xr.SkippedTypesNote = "Skipped " + strings.Join(skipped, ", ")
 	}

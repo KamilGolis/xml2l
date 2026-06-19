@@ -16,14 +16,14 @@ import (
 
 // Profile holds the parsed contents of a single .profile-meta.xml file.
 type Profile struct {
-	Name           string
-	SourcePath     string
-	RawXML         string
-	UserLicense    string
-	Description    string
-	IsCustom       bool
-	HasCustomField bool
-	Sections       map[string][]MetadataEntry
+	Name         string
+	SourcePath   string
+	RawXML       string
+	UserLicense  string
+	Description  string
+	IsCustom     bool
+	HasCustomTag bool
+	Sections     map[string][]MetadataEntry
 }
 
 // MetadataEntry represents a single permission entry within a profile section.
@@ -84,12 +84,12 @@ func init() {
 	sectionFuncs["customPermissions"] = decodeNameEnabled
 	sectionFuncs["customSettingAccesses"] = decodeNameEnabled
 	sectionFuncs["externalDataSourceAccesses"] = decodeExtDataSource
-	sectionFuncs["fieldLevelSecurities"] = decodeFieldLevelSecurities
 	sectionFuncs["fieldPermissions"] = decodeFieldPermissions
 	sectionFuncs["flowAccesses"] = decodeFlowAccesses
 	sectionFuncs["genComputingSummaryDefAccess"] = decodeGenComputingDef
 	sectionFuncs["layoutAssignments"] = decodeLayoutAssignments
-	sectionFuncs["loginFlows"] = decodeLoginFlows
+	sectionFuncs["loginFlows"] = decodeRawEntry
+	sectionFuncs["pageAccesses"] = decodePageAccesses
 	sectionFuncs["loginHours"] = decodeRawEntry
 	sectionFuncs["loginIpRanges"] = decodeRawEntry
 	sectionFuncs["objectPermissions"] = decodeObjectPermissions
@@ -168,7 +168,7 @@ func Decode(r io.Reader, gt scanner.GroundTruth) (*Profile, error) {
 					return nil, fmt.Errorf("custom: %w", err)
 				}
 				prof.IsCustom = strings.TrimSpace(val) == "true"
-				prof.HasCustomField = true
+				prof.HasCustomTag = true
 			case "description":
 				if err := decoder.DecodeElement(&prof.Description, &t); err != nil {
 					return nil, fmt.Errorf("description: %w", err)
@@ -221,9 +221,6 @@ func skipElement(decoder *xml.Decoder) error {
 	}
 }
 
-// decodeRawEntry consumes one element without producing edges.
-func decodeRawEntry(decoder *xml.Decoder, se *xml.StartElement, _ scanner.GroundTruth, _ *[]MetadataEntry) error {
-	// Decode into a discard target to advance the decoder past the element.
-	var discard interface{}
-	return decoder.DecodeElement(&discard, se)
+func decodeRawEntry(decoder *xml.Decoder, _ *xml.StartElement, _ scanner.GroundTruth, _ *[]MetadataEntry) error {
+	return skipElement(decoder)
 }
