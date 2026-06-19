@@ -154,3 +154,49 @@ func TestExtractFieldIdentifier(t *testing.T) {
 		}
 	}
 }
+
+func TestScanLayouts(t *testing.T) {
+	dir := t.TempDir()
+	layoutDir := filepath.Join(dir, "layouts")
+	if err := os.MkdirAll(layoutDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"Account-Account Layout.layout-meta.xml",
+		"Contact-Patient Layout.layout-meta.xml",
+		"Account-HCO Layout.layout-meta.xml",
+	} {
+		if err := os.WriteFile(filepath.Join(layoutDir, name), []byte("<xml/>"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	layouts, err := ScanLayouts(dir)
+	if err != nil {
+		t.Fatalf("ScanLayouts failed: %v", err)
+	}
+	if len(layouts) != 3 {
+		t.Fatalf("expected 3 layouts, got %d: %v", len(layouts), layouts)
+	}
+	// Should be sorted alphabetically.
+	if layouts[0] != "Account-Account Layout" {
+		t.Errorf("expected first layout Account-Account Layout, got %q", layouts[0])
+	}
+	if layouts[1] != "Account-HCO Layout" {
+		t.Errorf("expected second layout Account-HCO Layout, got %q", layouts[1])
+	}
+	if layouts[2] != "Contact-Patient Layout" {
+		t.Errorf("expected third layout Contact-Patient Layout, got %q", layouts[2])
+	}
+}
+
+func TestScanLayoutsMissingDirectory(t *testing.T) {
+	dir := t.TempDir()
+	layouts, err := ScanLayouts(dir)
+	if err != nil {
+		t.Fatalf("ScanLayouts should not error on missing directory: %v", err)
+	}
+	if layouts != nil && len(layouts) != 0 {
+		t.Errorf("expected empty slice for missing layouts dir, got %v", layouts)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -86,4 +87,27 @@ func extractFieldIdentifier(path, fileName string) string {
 	}
 
 	return ident
+}
+
+// ScanLayouts scans the layouts/ subdirectory of root for .layout-meta.xml files
+// and returns the layout names (extension stripped) in sorted order.
+// Returns an empty slice if the layouts directory does not exist.
+func ScanLayouts(root string) ([]string, error) {
+	layoutDir := filepath.Join(root, "layouts")
+	entries, err := os.ReadDir(layoutDir)
+	if err != nil {
+		return nil, nil // directory doesn't exist — no layouts available
+	}
+	var layouts []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasSuffix(name, ".layout-meta.xml") {
+			layouts = append(layouts, strings.TrimSuffix(name, ".layout-meta.xml"))
+		}
+	}
+	sort.Strings(layouts)
+	return layouts, nil
 }

@@ -148,6 +148,7 @@ type NormalizeGraph interface {
 	Profiles() []*graph.ProfileNode
 	ProfileEdges(p *graph.ProfileNode) []*graph.Edge
 	MasterSchema() graph.MasterSchemaProvider
+	AvailableLayouts() []string
 }
 
 // -- DefaultEdgeProperties
@@ -229,13 +230,40 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 		entries = append(entries, sectionEntries...)
 
 		// Backfill: add Master Schema entries missing from this profile.
-		msNamesList := g.MasterSchema().AllNames(sectionTag)
-		for _, name := range msNamesList {
-			if !existing[name] {
-				entries = append(entries, nameAndProps{
-					name:  name,
-					props: DefaultEdgeProperties(metaType),
-				})
+		// Skip backfill for layoutAssignments — Salesforce requires at most one
+		// layout per object without a recordType, so backfilling from other
+		// profiles creates invalid configurations.
+		if sectionTag != "layoutAssignments" {
+			msNamesList := g.MasterSchema().AllNames(sectionTag)
+			for _, name := range msNamesList {
+				if !existing[name] {
+					entries = append(entries, nameAndProps{
+						name:  name,
+						props: DefaultEdgeProperties(metaType),
+					})
+				}
+			}
+		}
+
+		// For layoutAssignments: add a default layout for objects with no entries.
+		if sectionTag == "layoutAssignments" {
+			available := g.AvailableLayouts()
+			if len(available) > 0 {
+				objectsHaveLayout := make(map[string]bool)
+				for _, e := range entries {
+					objectsHaveLayout[objectFromLayoutName(e.name)] = true
+				}
+				seenAdded := make(map[string]bool)
+				for _, layout := range available {
+					obj := objectFromLayoutName(layout)
+					if !objectsHaveLayout[obj] && !seenAdded[obj] {
+						seenAdded[obj] = true
+						entries = append(entries, nameAndProps{
+							name:  layout,
+							props: graph.EdgeProperties{}, // no recordType
+						})
+					}
+				}
 			}
 		}
 
@@ -243,10 +271,38 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 			continue
 		}
 
-		// Sort alphabetically by name.
+		// Sort alphabetically by name, then by record type for deterministic output.
 		sort.Slice(entries, func(i, j int) bool {
-			return entries[i].name < entries[j].name
+			if entries[i].name != entries[j].name {
+				return entries[i].name < entries[j].name
+			}
+			return strVal(entries[i].props.RecordType) < strVal(entries[j].props.RecordType)
 		})
+
+		// Filter layoutAssignments: enforce Salesforce deployment rules.
+		// - At most one layout per object without a recordType.
+		// - No duplicate recordType values.
+		if sectionTag == "layoutAssignments" {
+			seenNoRT := make(map[string]bool)
+			seenRT := make(map[string]bool)
+			filtered := make([]nameAndProps, 0, len(entries))
+			for _, e := range entries {
+				obj := objectFromLayoutName(e.name)
+				rt := strVal(e.props.RecordType)
+				if rt == "" {
+					if !seenNoRT[obj] {
+						seenNoRT[obj] = true
+						filtered = append(filtered, e)
+					}
+				} else {
+					if !seenRT[rt] {
+						seenRT[rt] = true
+						filtered = append(filtered, e)
+					}
+				}
+			}
+			entries = filtered
+		}
 
 		// Marshal each entry.
 		for _, e := range entries {
@@ -371,6 +427,16 @@ func strVal(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// objectFromLayoutName extracts the object name from a layout name.
+// Layout names follow the pattern "ObjectName-LayoutFriendlyName".
+// If no hyphen is present, the full name is returned.
+func objectFromLayoutName(layoutName string) string {
+	if idx := strings.Index(layoutName, "-"); idx >= 0 {
+		return layoutName[:idx]
+	}
+	return layoutName
 }
 
 // extractUnmappedSections extracts unmapped sections from raw XML for preservation.
