@@ -3,8 +3,6 @@
 *.dll
 *.so
 *.dylib
-engine
-engine.exe
 /sandbox/
 
 # Test binary (built by `go test -c`)
@@ -27,3 +25,6 @@ vendor/
 *.out
 *.cov
 coverage/
+
+# SDD
+openspec/
