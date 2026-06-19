@@ -47,6 +47,9 @@ func LoadProfiles(projectPath string) (*graph.SalesforceGraph, error) {
 
 	g.SetMasterSchema(ms)
 
+	layouts, _ := scanner.ScanLayouts(projectPath)
+	g.SetAvailableLayouts(layouts)
+
 	for _, r := range results {
 		if r.Profile == nil {
 			continue

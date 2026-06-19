@@ -40,7 +40,7 @@ The graph model is bipartite — one side is profiles, the other is permission t
 | `fieldPermissions` | readable, editable | `readable: false`, `editable: false` |
 | `fieldLevelSecurities` | hidden | — (not backfilled as separate section — `fieldPermissions` covers visibility) |
 | `objectPermissions` | allowRead, allowCreate, allowEdit, allowDelete, modifyAll, viewAll | all six `: false` |
-| `layoutAssignments` | layout, recordType | no boolean defaults (string/unstructured) |
+| `layoutAssignments` | layout, recordType | not backfilled (Salesforce requires at most one layout per object without recordType) |
 | `tabVisibilities` | visibility | `visibility: "Hidden"` |
 | `recordTypeVisibilities` | visible, default, recordType | `visible: false`, `default: false` |
 | `userPermissions` | enabled | `enabled: false` |
@@ -90,6 +90,7 @@ The graph model is bipartite — one side is profiles, the other is permission t
 When you run `profile save`, every profile gets:
 
 - **Backfilled entries** — if any profile references a piece of metadata, every profile gets an entry for it (with all booleans set to `false`)
+- **Layout assignments filtered and defaulted** — each profile keeps its own `layoutAssignments` entries (no backfilling from other profiles); entries are filtered to enforce Salesforce rules (at most one layout per object without a `recordType`, no duplicate `recordType` values); when a profile has no layout assignment for an object, a default is added from the first matching layout file on disk
 - **Sorted sections** — entries within each section are sorted alphabetically
 - **Preserved orphan sections** — `loginHours`, `loginIpRanges`, `profileActionOverrides` are extracted and re-inserted verbatim, even though the tool doesn't model them in the graph
 

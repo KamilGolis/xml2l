@@ -167,6 +167,197 @@ func TestNormalizeProfileBackfill(t *testing.T) {
 	}
 }
 
+func TestNormalizeProfileLayoutNoBackfill(t *testing.T) {
+	ms := schema.NewMasterSchema()
+	ms.Add("layoutAssignments", "Account-Account Layout")
+	ms.Add("layoutAssignments", "Account-Sales Layout")
+	ms.Add("layoutAssignments", "Contact-Patient Layout")
+
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+
+	// Profile has Account-Account Layout only.
+	layoutNode := g.GetOrCreateMetadataNode(graph.MetaTypeLayout, "Account-Account Layout")
+	g.AddEdge(p, layoutNode, graph.EdgeProperties{})
+
+	xmlBytes := NormalizeProfile(p, g)
+	output := string(xmlBytes)
+
+	// Existing layout must be present.
+	if !strings.Contains(output, "Account-Account Layout") {
+		t.Error("missing existing layout assignment")
+	}
+
+	// Backfilled layouts must NOT appear.
+	if strings.Contains(output, "Account-Sales Layout") {
+		t.Error("layoutAssignments should not be backfilled from Master Schema")
+	}
+	if strings.Contains(output, "Contact-Patient Layout") {
+		t.Error("layoutAssignments should not be backfilled from Master Schema")
+	}
+}
+
+func TestNormalizeProfileLayoutSortByRecordType(t *testing.T) {
+	ms := schema.NewMasterSchema()
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+
+	// Add same layout with two record types + one without.
+	layoutNode := g.GetOrCreateMetadataNode(graph.MetaTypeLayout, "Account-Account Layout")
+	rt2 := "Account.RT2"
+	rt1 := "Account.RT1"
+	g.AddEdge(p, layoutNode, graph.EdgeProperties{RecordType: &rt2})
+	g.AddEdge(p, layoutNode, graph.EdgeProperties{RecordType: &rt1})
+	emptyRT := ""
+	g.AddEdge(p, layoutNode, graph.EdgeProperties{RecordType: &emptyRT})
+
+	xmlBytes := NormalizeProfile(p, g)
+	output := string(xmlBytes)
+
+	// Entries should appear in order: no recordType, then RT1, then RT2.
+	rtNonePos := strings.Index(output, "<layoutAssignments>\n        <layout>Account-Account Layout</layout>\n    </layoutAssignments>")
+	rt1Pos := strings.Index(output, "Account.RT1")
+	rt2Pos := strings.Index(output, "Account.RT2")
+
+	if rtNonePos < 0 {
+		t.Fatal("missing layout entry without recordType")
+	}
+	if rt1Pos < 0 || rt2Pos < 0 {
+		t.Fatal("missing layout entries with recordTypes")
+	}
+	if !(rtNonePos < rt1Pos && rt1Pos < rt2Pos) {
+		t.Errorf("layout entries not sorted by recordType: none=%d, RT1=%d, RT2=%d", rtNonePos, rt1Pos, rt2Pos)
+	}
+}
+
+func TestNormalizeProfileLayoutDefaultFromDisk(t *testing.T) {
+	ms := schema.NewMasterSchema()
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+	g.SetAvailableLayouts([]string{
+		"Account-Account Layout",
+		"Account-HCO Layout",
+		"Contact-Patient Layout",
+	})
+	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+
+	// Profile has NO layout assignments at all.
+	xmlBytes := NormalizeProfile(p, g)
+	output := string(xmlBytes)
+
+	if !strings.Contains(output, "Account-Account Layout") {
+		t.Error("expected default Account-Account Layout for Account object")
+	}
+	if strings.Contains(output, "Account-HCO Layout") {
+		t.Error("should not add second Account layout as default")
+	}
+	if !strings.Contains(output, "Contact-Patient Layout") {
+		t.Error("expected default Contact-Patient Layout for Contact object")
+	}
+}
+
+func TestNormalizeProfileLayoutNoDefaultWhenEntriesExist(t *testing.T) {
+	ms := schema.NewMasterSchema()
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+	g.SetAvailableLayouts([]string{
+		"Account-Account Layout",
+		"Account-HCO Layout",
+		"Contact-Patient Layout",
+	})
+	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+
+	rt := "Account.HCO"
+	node := g.GetOrCreateMetadataNode(graph.MetaTypeLayout, "Account-Custom Layout")
+	g.AddEdge(p, node, graph.EdgeProperties{RecordType: &rt})
+
+	xmlBytes := NormalizeProfile(p, g)
+	output := string(xmlBytes)
+
+	if !strings.Contains(output, "Account-Custom Layout") {
+		t.Error("existing Account layout should be kept")
+	}
+	if strings.Contains(output, "Account-Account Layout") {
+		t.Error("should not add default Account layout when profile already has Account entries")
+	}
+	if !strings.Contains(output, "Contact-Patient Layout") {
+		t.Error("expected default Contact layout — profile has no Contact entries")
+	}
+}
+
+func TestNormalizeProfileLayoutFiltersMultipleNoRecordType(t *testing.T) {
+	ms := schema.NewMasterSchema()
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+
+	layouts := []struct {
+		name string
+		rt   string
+	}{
+		{"Account-Sales Layout", ""},
+		{"Account-Account Layout", ""},
+		{"Account-Other Layout", ""},
+		{"Account-HCO Layout", "Account.HCO"},
+		{"Account-HCS Layout", "Account.HCS"},
+	}
+	for _, l := range layouts {
+		node := g.GetOrCreateMetadataNode(graph.MetaTypeLayout, l.name)
+		var rtPtr *string
+		if l.rt != "" {
+			rtPtr = &l.rt
+		}
+		g.AddEdge(p, node, graph.EdgeProperties{RecordType: rtPtr})
+	}
+
+	xmlBytes := NormalizeProfile(p, g)
+	output := string(xmlBytes)
+
+	if !strings.Contains(output, "Account-Account Layout") {
+		t.Error("expected Account-Account Layout (first no-RT) to be kept")
+	}
+	if strings.Contains(output, "Account-Sales Layout") {
+		t.Error("Account-Sales Layout (no-RT, not first) should be filtered")
+	}
+	if strings.Contains(output, "Account-Other Layout") {
+		t.Error("Account-Other Layout (no-RT, not first) should be filtered")
+	}
+	if !strings.Contains(output, "Account-HCO Layout") {
+		t.Error("Account-HCO Layout (with RT) should be kept")
+	}
+	if !strings.Contains(output, "Account-HCS Layout") {
+		t.Error("Account-HCS Layout (with RT) should be kept")
+	}
+}
+
+func TestNormalizeProfileLayoutDedupRecordTypes(t *testing.T) {
+	ms := schema.NewMasterSchema()
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+
+	rt := "Account.HCO"
+	node1 := g.GetOrCreateMetadataNode(graph.MetaTypeLayout, "Account-Alpha Layout")
+	node2 := g.GetOrCreateMetadataNode(graph.MetaTypeLayout, "Account-Beta Layout")
+	g.AddEdge(p, node1, graph.EdgeProperties{RecordType: &rt})
+	g.AddEdge(p, node2, graph.EdgeProperties{RecordType: &rt})
+
+	xmlBytes := NormalizeProfile(p, g)
+	output := string(xmlBytes)
+
+	if !strings.Contains(output, "Account-Alpha Layout") {
+		t.Error("expected Account-Alpha Layout (first with RT) to be kept")
+	}
+	if strings.Contains(output, "Account-Beta Layout") {
+		t.Error("Account-Beta Layout (duplicate recordType) should be filtered")
+	}
+	if strings.Count(output, "Account.HCO") != 1 {
+		t.Errorf("expected exactly 1 occurrence of Account.HCO recordType, got %d", strings.Count(output, "Account.HCO"))
+	}
+}
+
 func TestNormalizeProfileXMLHeader(t *testing.T) {
 	ms := schema.NewMasterSchema()
 	g := graph.NewGraph()

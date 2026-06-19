@@ -83,12 +83,13 @@ type MasterSchemaProvider interface {
 // SalesforceGraph is a bipartite graph of profile and metadata nodes with
 // indexed edges for fast lookup from either side.
 type SalesforceGraph struct {
-	ProfileNodes   map[string]*ProfileNode  // keyed by profile name
-	MetadataNodes  map[string]*MetadataNode // keyed by "MetaType:Name"
-	Edges          []*Edge
-	ProfileToEdges map[*ProfileNode][]*Edge
-	MetaToEdges    map[*MetadataNode][]*Edge
-	masterSchema   MasterSchemaProvider
+	ProfileNodes     map[string]*ProfileNode  // keyed by profile name
+	MetadataNodes    map[string]*MetadataNode // keyed by "MetaType:Name"
+	Edges            []*Edge
+	ProfileToEdges   map[*ProfileNode][]*Edge
+	MetaToEdges      map[*MetadataNode][]*Edge
+	masterSchema     MasterSchemaProvider
+	availableLayouts []string
 }
 
 // NewGraph creates an empty SalesforceGraph.
@@ -161,6 +162,16 @@ func (g *SalesforceGraph) MasterSchema() MasterSchemaProvider {
 // SetMasterSchema sets the graph's master schema provider.
 func (g *SalesforceGraph) SetMasterSchema(ms MasterSchemaProvider) {
 	g.masterSchema = ms
+}
+
+// SetAvailableLayouts stores the list of layout names available on disk.
+func (g *SalesforceGraph) SetAvailableLayouts(layouts []string) {
+	g.availableLayouts = layouts
+}
+
+// AvailableLayouts returns the list of layout names available on disk, sorted.
+func (g *SalesforceGraph) AvailableLayouts() []string {
+	return g.availableLayouts
 }
 
 // -- Canonical metadata type registry
