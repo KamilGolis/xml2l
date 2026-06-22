@@ -149,6 +149,7 @@ type NormalizeGraph interface {
 	ProfileEdges(p *graph.ProfileNode) []*graph.Edge
 	MasterSchema() graph.MasterSchemaProvider
 	AvailableLayouts() []string
+	OrgSchema() graph.OrgSchemaProvider
 }
 
 // -- DefaultEdgeProperties
@@ -265,6 +266,18 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 					}
 				}
 			}
+		}
+
+		// Org schema filtering: if org schema is active for this type, skip
+		// entries that don't exist in the org (overrides all other checks).
+		if os := g.OrgSchema(); os != nil && os.HasType(string(metaType)) {
+			filtered := make([]nameAndProps, 0, len(entries))
+			for _, e := range entries {
+				if os.Has(string(metaType), e.name) {
+					filtered = append(filtered, e)
+				}
+			}
+			entries = filtered
 		}
 
 		if len(entries) == 0 {

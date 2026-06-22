@@ -594,6 +594,98 @@ func TestNormalizeProfileAlphabeticalSort(t *testing.T) {
 	}
 }
 
+// mockOrgSchema is a test implementation of graph.OrgSchemaProvider.
+type mockOrgSchema struct {
+	entries map[string]map[string]bool
+}
+
+func (m *mockOrgSchema) Has(xmlName, fullName string) bool {
+	if m == nil {
+		return false
+	}
+	names, ok := m.entries[xmlName]
+	if !ok {
+		return false
+	}
+	return names[fullName]
+}
+
+func (m *mockOrgSchema) HasType(xmlName string) bool {
+	if m == nil {
+		return false
+	}
+	_, ok := m.entries[xmlName]
+	return ok
+}
+
+func newMockOrgSchema(entries map[string]map[string]bool) *mockOrgSchema {
+	return &mockOrgSchema{entries: entries}
+}
+
+func TestNormalizeProfileOrgSchemaFiltersApexClass(t *testing.T) {
+	ms := schema.NewMasterSchema()
+	ms.Add("classAccesses", "ClassA")
+	ms.Add("classAccesses", "ClassB")
+	ms.Add("classAccesses", "ClassC")
+
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+	// Org schema only has ClassA — ClassB and ClassC should be filtered out.
+	g.SetOrgSchema(newMockOrgSchema(map[string]map[string]bool{
+		"CustomField": {},
+		"ApexClass":   {"ClassA": true},
+	}))
+
+	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	// Profile has ClassA (from graph edges).
+	nodeA := g.GetOrCreateMetadataNode(graph.MetaTypeApexClass, "ClassA")
+	g.AddEdge(p, nodeA, graph.EdgeProperties{Enabled: boolPtr(true)})
+
+	xmlBytes := NormalizeProfile(p, g)
+	output := string(xmlBytes)
+
+	if !strings.Contains(output, "ClassA") {
+		t.Error("expected ClassA (present in org) to be in output")
+	}
+	if strings.Contains(output, "ClassB") {
+		t.Error("ClassB (not in org) should be filtered out")
+	}
+	if strings.Contains(output, "ClassC") {
+		t.Error("ClassC (not in org) should be filtered out")
+	}
+}
+
+func TestNormalizeProfileOrgSchemaFiltersLayouts(t *testing.T) {
+	ms := schema.NewMasterSchema()
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+	g.SetAvailableLayouts([]string{
+		"Account-Account Layout",
+		"Account-Other Layout",
+		"Contact-Patient Layout",
+	})
+	// Org schema only has Account-Account Layout and Contact-Patient Layout.
+	g.SetOrgSchema(newMockOrgSchema(map[string]map[string]bool{
+		"ApexClass": {},
+		"Layout":    {"Account-Account Layout": true, "Contact-Patient Layout": true},
+	}))
+
+	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+
+	xmlBytes := NormalizeProfile(p, g)
+	output := string(xmlBytes)
+
+	if !strings.Contains(output, "Account-Account Layout") {
+		t.Error("expected Account-Account Layout (in org) to be in output")
+	}
+	if strings.Contains(output, "Account-Other Layout") {
+		t.Error("Account-Other Layout (not in org) should be filtered out")
+	}
+	if !strings.Contains(output, "Contact-Patient Layout") {
+		t.Error("expected Contact-Patient Layout (in org) to be in output")
+	}
+}
+
 func strPtr(s string) *string { return &s }
 
 func boolPtr(b bool) *bool { return &b }

@@ -229,7 +229,7 @@ func TestFormatDiffText_ValueDifferences(t *testing.T) {
 func TestComputeDiff_MultipleMetaTypes(t *testing.T) {
 	g := newTestGraph()
 	addEdge(g, "Admin", "ApexClass", "Logger", graph.EdgeProperties{Enabled: boolPtr(true)})
-	addEdge(g, "Admin", "Field", "Account.Industry", graph.EdgeProperties{Readable: boolPtr(true), Editable: boolPtr(true)})
+	addEdge(g, "Admin", "CustomField", "Account.Industry", graph.EdgeProperties{Readable: boolPtr(true), Editable: boolPtr(true)})
 	addEdge(g, "Customer Service", "ApexClass", "Logger", graph.EdgeProperties{Enabled: boolPtr(true)})
 
 	r := ComputeDiff(g, false, "")
@@ -238,7 +238,7 @@ func TestComputeDiff_MultipleMetaTypes(t *testing.T) {
 	if cs == nil {
 		t.Fatal("Customer Service should appear in report")
 	}
-	if !contains(cs.Missing["Field"], "Account.Industry") {
+	if !contains(cs.Missing["CustomField"], "Account.Industry") {
 		t.Errorf("Customer Service should be missing Account.Industry field")
 	}
 	// Logger is shared — Admin should not appear in report.
@@ -277,10 +277,10 @@ func TestScanRepo_Basic(t *testing.T) {
 	}
 
 	// Check flat types.
-	if !repo["App"]["MyApp"] {
+	if !repo["CustomApplication"]["MyApp"] {
 		t.Error("expected MyApp in App results")
 	}
-	if !repo["Tab"]["MyTab"] {
+	if !repo["CustomTab"]["MyTab"] {
 		t.Error("expected MyTab in Tab results")
 	}
 	if !repo["Layout"]["MyLayout"] {
@@ -288,18 +288,18 @@ func TestScanRepo_Basic(t *testing.T) {
 	}
 
 	// Check Object types.
-	if !repo["Object"]["Account"] {
+	if !repo["CustomObject"]["Account"] {
 		t.Error("expected Account in Object results")
 	}
 	if !repo["CustomSetting"]["MyCustom__c"] {
 		t.Error("expected MyCustom__c in CustomSetting results")
 	}
-	if !repo["CustomMetadataType"]["MyMetadata__mdt"] {
+	if !repo["CustomMetadata"]["MyMetadata__mdt"] {
 		t.Error("expected MyMetadata__mdt in CustomMetadataType results")
 	}
 
 	// Check Field and RecordType (object subdirs).
-	if !repo["Field"]["Account.Industry"] {
+	if !repo["CustomField"]["Account.Industry"] {
 		t.Error("expected Account.Industry in Field results")
 	}
 	if !repo["RecordType"]["Account.Customer"] {
@@ -307,10 +307,10 @@ func TestScanRepo_Basic(t *testing.T) {
 	}
 
 	// Verify validationRules and listViews NOT scanned.
-	if repo["Field"] != nil && repo["Field"]["Account.SomeRule"] {
+	if repo["CustomField"] != nil && repo["CustomField"]["Account.SomeRule"] {
 		t.Error("validationRules should NOT be scanned")
 	}
-	if repo["Object"] != nil && repo["Object"]["Account.All"] {
+	if repo["CustomObject"] != nil && repo["CustomObject"]["Account.All"] {
 		t.Error("listViews should NOT be scanned")
 	}
 }
@@ -348,8 +348,8 @@ func TestCrossReference_MissingAndUnreferenced(t *testing.T) {
 	g.GetOrCreateMetadataNode(graph.MetaTypeApexClass, "DeletedClass")
 
 	repoFiles := map[string]map[string]bool{
-		"ApexClass": {"ExistingClass": true},
-		"App":       {"MyApp": true},
+		"ApexClass":         {"ExistingClass": true},
+		"CustomApplication": {"MyApp": true},
 	}
 
 	xr := CrossReference(g, repoFiles)
@@ -373,7 +373,7 @@ func TestCrossReference_MissingAndUnreferenced(t *testing.T) {
 		if entry.MetaType == "ApexClass" && entry.Name == "ExistingClass" {
 			foundUnrefApex = true
 		}
-		if entry.MetaType == "App" && entry.Name == "MyApp" {
+		if entry.MetaType == "CustomApplication" && entry.Name == "MyApp" {
 			foundUnrefApp = true
 		}
 	}
@@ -426,7 +426,7 @@ func TestFormatDiffText_CrossRef(t *testing.T) {
 				{MetaType: "ApexClass", Name: "DeletedClass"},
 			},
 			Unreferenced: []RepoEntry{
-				{MetaType: "App", Name: "MyApp"},
+				{MetaType: "CustomApplication", Name: "MyApp"},
 			},
 		},
 	}

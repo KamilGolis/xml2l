@@ -69,6 +69,12 @@ The graph model is bipartite — one side is profiles, the other is permission t
 
 ```
 
+# Normalize profiles with org schema cross-check
+./xml2l profile save --path ./my-sfdx-project/main/default -s
+
+# Normalize profiles with org schema cross-check against specific org
+./xml2l profile save --path ./my-sfdx-project/main/default -s -o myOrg
+
 ### Example output
 
 ```
@@ -93,6 +99,7 @@ When you run `profile save`, every profile gets:
 - **Layout assignments filtered and defaulted** — each profile keeps its own `layoutAssignments` entries (no backfilling from other profiles); entries are filtered to enforce Salesforce rules (at most one layout per object without a `recordType`, no duplicate `recordType` values); when a profile has no layout assignment for an object, a default is added from the first matching layout file on disk
 - **Sorted sections** — entries within each section are sorted alphabetically
 - **Preserved orphan sections** — `loginHours`, `loginIpRanges`, `profileActionOverrides` are extracted and re-inserted verbatim, even though the tool doesn't model them in the graph
+- **Org schema filtering (optional)** — when `--use-org-schema` (`-s`) is passed, entries are cross-checked against the Salesforce org via `sf org list metadata`; any entry whose metadata name does not exist in the org is skipped (overrides repository and graph checks); use `--org` (`-o`) to target a specific org alias
 
 The goal is deterministic output: run it twice, get identical files.
 

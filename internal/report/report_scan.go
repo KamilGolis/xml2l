@@ -111,9 +111,9 @@ func ScanRepo(root string) (map[string]map[string]bool, error) {
 					if strings.HasSuffix(name, "__c") {
 						result["CustomSetting"][name] = true
 					} else if strings.HasSuffix(name, "__mdt") {
-						result["CustomMetadataType"][name] = true
+						result["CustomMetadata"][name] = true
 					} else {
-						result["Object"][name] = true
+						result["CustomObject"][name] = true
 					}
 				}
 			}
@@ -146,7 +146,7 @@ func expectedPath(metaType, name string) string {
 		return de.Dir + "/" + name
 	}
 	// Handle Field and RecordType from object subdirs.
-	if metaType == "Field" || metaType == "RecordType" {
+	if metaType == "CustomField" || metaType == "RecordType" {
 		parts := strings.SplitN(name, ".", 2)
 		if len(parts) == 2 {
 			subDir := "fields"
