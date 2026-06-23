@@ -97,6 +97,7 @@ type SalesforceGraph struct {
 	masterSchema     MasterSchemaProvider
 	availableLayouts []string
 	orgSchema        OrgSchemaProvider
+	excludePatterns  []string
 }
 
 // NewGraph creates an empty SalesforceGraph.
@@ -186,10 +187,20 @@ func (g *SalesforceGraph) SetOrgSchema(os OrgSchemaProvider) {
 	g.orgSchema = os
 }
 
+// SetExcludePatterns stores the exclude patterns for normalization filtering.
+func (g *SalesforceGraph) SetExcludePatterns(patterns []string) {
+	g.excludePatterns = patterns
+}
+
 // OrgSchema returns the org schema provider for org-based filtering.
 // Returns nil when not set — the normalizer skips org filtering in that case.
 func (g *SalesforceGraph) OrgSchema() OrgSchemaProvider {
 	return g.orgSchema
+}
+
+// ExcludePatterns returns the exclude patterns for normalization filtering.
+func (g *SalesforceGraph) ExcludePatterns() []string {
+	return g.excludePatterns
 }
 
 // -- Canonical metadata type registry
