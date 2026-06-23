@@ -67,17 +67,18 @@ The graph model is bipartite — one side is profiles, the other is permission t
 # Normalize all profiles — backfill missing entries, sort, write
 ./xml2l profile save --path ./my-sfdx-project/main/default
 
-```
-
 # Normalize profiles with org schema cross-check
-./xml2l profile save --path ./my-sfdx-project/main/default -s
+./xml2l profile save --path ./my-sfdx-project/main/default --use-org-schema
 
 # Normalize profiles with org schema cross-check against specific org
-./xml2l profile save --path ./my-sfdx-project/main/default -s -o myOrg
+./xml2l profile save --path ./my-sfdx-project/main/default --use-org-schema --org myOrg
+
+# Normalize profiles with org schema cross-check against specific org and exclude specific metadata
+./xml2l profile save --path ./my-sfdx-project/main/default --use-org-schema -org myOrg --exclude "chatter"
+```
 
 ### Example output
 
-```
 [Admin]
   ApexClass (3):
     SomeClass
