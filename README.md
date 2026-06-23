@@ -79,6 +79,7 @@ The graph model is bipartite — one side is profiles, the other is permission t
 
 ### Example output
 
+```
 [Admin]
   ApexClass (3):
     SomeClass
