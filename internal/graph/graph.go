@@ -10,15 +10,15 @@ type MetadataType string
 
 const (
 	MetaTypeApexClass              MetadataType = "ApexClass"
-	MetaTypeField                  MetadataType = "Field"
-	MetaTypeObject                 MetadataType = "Object"
-	MetaTypePage                   MetadataType = "Page"
+	MetaTypeField                  MetadataType = "CustomField"
+	MetaTypeObject                 MetadataType = "CustomObject"
+	MetaTypePage                   MetadataType = "ApexPage"
 	MetaTypeRecordType             MetadataType = "RecordType"
-	MetaTypeTab                    MetadataType = "Tab"
-	MetaTypeApp                    MetadataType = "App"
+	MetaTypeTab                    MetadataType = "CustomTab"
+	MetaTypeApp                    MetadataType = "CustomApplication"
 	MetaTypeUserPerm               MetadataType = "UserPermission"
 	MetaTypeLayout                 MetadataType = "Layout"
-	MetaTypeCustomMetadataType     MetadataType = "CustomMetadataType"
+	MetaTypeCustomMetadataType     MetadataType = "CustomMetadata"
 	MetaTypeCustomPermission       MetadataType = "CustomPermission"
 	MetaTypeCustomSetting          MetadataType = "CustomSetting"
 	MetaTypeFlow                   MetadataType = "Flow"
@@ -75,9 +75,15 @@ type Edge struct {
 
 // MasterSchemaProvider is the interface the graph expects for schema-backed
 // operations such as normalization backfilling. It exposes a single method
-// that returns all known metadata names for a given XML section tag.
 type MasterSchemaProvider interface {
 	AllNames(tag string) []string
+}
+
+// OrgSchemaProvider is the interface for checking metadata existence against
+// a Salesforce org schema. Implementations are provided by the orgschema package.
+type OrgSchemaProvider interface {
+	Has(xmlName, fullName string) bool
+	HasType(xmlName string) bool
 }
 
 // SalesforceGraph is a bipartite graph of profile and metadata nodes with
@@ -90,6 +96,8 @@ type SalesforceGraph struct {
 	MetaToEdges      map[*MetadataNode][]*Edge
 	masterSchema     MasterSchemaProvider
 	availableLayouts []string
+	orgSchema        OrgSchemaProvider
+	excludePatterns  []string
 }
 
 // NewGraph creates an empty SalesforceGraph.
@@ -172,6 +180,27 @@ func (g *SalesforceGraph) SetAvailableLayouts(layouts []string) {
 // AvailableLayouts returns the list of layout names available on disk, sorted.
 func (g *SalesforceGraph) AvailableLayouts() []string {
 	return g.availableLayouts
+}
+
+// SetOrgSchema stores the org schema provider for org-based filtering.
+func (g *SalesforceGraph) SetOrgSchema(os OrgSchemaProvider) {
+	g.orgSchema = os
+}
+
+// SetExcludePatterns stores the exclude patterns for normalization filtering.
+func (g *SalesforceGraph) SetExcludePatterns(patterns []string) {
+	g.excludePatterns = patterns
+}
+
+// OrgSchema returns the org schema provider for org-based filtering.
+// Returns nil when not set — the normalizer skips org filtering in that case.
+func (g *SalesforceGraph) OrgSchema() OrgSchemaProvider {
+	return g.orgSchema
+}
+
+// ExcludePatterns returns the exclude patterns for normalization filtering.
+func (g *SalesforceGraph) ExcludePatterns() []string {
+	return g.excludePatterns
 }
 
 // -- Canonical metadata type registry

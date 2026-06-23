@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"xml2l/internal/normalizer"
+	"xml2l/internal/orgschema"
 	reportpkg "xml2l/internal/report"
 	"xml2l/internal/schema"
 )
@@ -147,6 +148,9 @@ permission value differences for shared tags. Use --export to write the report t
 }
 
 func newSaveCmd() *cobra.Command {
+	useOrgSchema := false
+	orgFlag := ""
+	excludeFlag := ""
 	cmd := &cobra.Command{
 		Use:   "save",
 		Short: "Normalize and save profile changes to disk",
@@ -161,6 +165,29 @@ func newSaveCmd() *cobra.Command {
 				return err
 			}
 
+			if useOrgSchema {
+				os, err := orgschema.Fetch(orgFlag)
+				if err != nil {
+					return err
+				}
+				g.SetOrgSchema(os)
+			}
+
+			// Exclude flag: skip normalization for entries matching patterns.
+			var excludePatterns []string
+			if excludeFlag != "" {
+				if !useOrgSchema {
+					return fmt.Errorf("--exclude / -e requires --use-org-schema / -s")
+				}
+				for _, term := range strings.Split(excludeFlag, ",") {
+					trimmed := strings.TrimSpace(strings.ToLower(term))
+					if trimmed != "" {
+						excludePatterns = append(excludePatterns, trimmed)
+					}
+				}
+				g.SetExcludePatterns(excludePatterns)
+			}
+
 			if err := normalizer.WriteProfiles(g); err != nil {
 				return err
 			}
@@ -169,5 +196,8 @@ func newSaveCmd() *cobra.Command {
 		},
 	}
 	addPathFlag(cmd)
+	cmd.Flags().BoolVarP(&useOrgSchema, "use-org-schema", "s", false, "Cross-check metadata against Salesforce org schema before saving")
+	cmd.Flags().StringVarP(&orgFlag, "org", "o", "", "Salesforce org alias (default: SF CLI default org)")
+	cmd.Flags().StringVarP(&excludeFlag, "exclude", "e", "", "Comma-separated case-insensitive substrings; matching entries skip normalization and preserve original XML (requires --use-org-schema)")
 	return cmd
 }

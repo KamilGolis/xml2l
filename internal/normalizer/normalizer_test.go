@@ -594,6 +594,372 @@ func TestNormalizeProfileAlphabeticalSort(t *testing.T) {
 	}
 }
 
+// mockOrgSchema is a test implementation of graph.OrgSchemaProvider.
+type mockOrgSchema struct {
+	entries map[string]map[string]bool
+}
+
+func (m *mockOrgSchema) Has(xmlName, fullName string) bool {
+	if m == nil {
+		return false
+	}
+	names, ok := m.entries[xmlName]
+	if !ok {
+		return false
+	}
+	return names[fullName]
+}
+
+func (m *mockOrgSchema) HasType(xmlName string) bool {
+	if m == nil {
+		return false
+	}
+	_, ok := m.entries[xmlName]
+	return ok
+}
+
+func newMockOrgSchema(entries map[string]map[string]bool) *mockOrgSchema {
+	return &mockOrgSchema{entries: entries}
+}
+
+func TestNormalizeProfileOrgSchemaFiltersApexClass(t *testing.T) {
+	ms := schema.NewMasterSchema()
+	ms.Add("classAccesses", "ClassA")
+	ms.Add("classAccesses", "ClassB")
+	ms.Add("classAccesses", "ClassC")
+
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+	// Org schema only has ClassA — ClassB and ClassC should be filtered out.
+	g.SetOrgSchema(newMockOrgSchema(map[string]map[string]bool{
+		"CustomField": {},
+		"ApexClass":   {"ClassA": true},
+	}))
+
+	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	// Profile has ClassA (from graph edges).
+	nodeA := g.GetOrCreateMetadataNode(graph.MetaTypeApexClass, "ClassA")
+	g.AddEdge(p, nodeA, graph.EdgeProperties{Enabled: boolPtr(true)})
+
+	xmlBytes := NormalizeProfile(p, g)
+	output := string(xmlBytes)
+
+	if !strings.Contains(output, "ClassA") {
+		t.Error("expected ClassA (present in org) to be in output")
+	}
+	if strings.Contains(output, "ClassB") {
+		t.Error("ClassB (not in org) should be filtered out")
+	}
+	if strings.Contains(output, "ClassC") {
+		t.Error("ClassC (not in org) should be filtered out")
+	}
+}
+
+func TestNormalizeProfileOrgSchemaFiltersLayouts(t *testing.T) {
+	ms := schema.NewMasterSchema()
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+	g.SetAvailableLayouts([]string{
+		"Account-Account Layout",
+		"Account-Other Layout",
+		"Contact-Patient Layout",
+	})
+	// Org schema only has Account-Account Layout and Contact-Patient Layout.
+	g.SetOrgSchema(newMockOrgSchema(map[string]map[string]bool{
+		"ApexClass": {},
+		"Layout":    {"Account-Account Layout": true, "Contact-Patient Layout": true},
+	}))
+
+	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+
+	xmlBytes := NormalizeProfile(p, g)
+	output := string(xmlBytes)
+
+	if !strings.Contains(output, "Account-Account Layout") {
+		t.Error("expected Account-Account Layout (in org) to be in output")
+	}
+	if strings.Contains(output, "Account-Other Layout") {
+		t.Error("Account-Other Layout (not in org) should be filtered out")
+	}
+	if !strings.Contains(output, "Contact-Patient Layout") {
+		t.Error("expected Contact-Patient Layout (in org) to be in output")
+	}
+}
+
+
+func TestMatchesExclude(t *testing.T) {
+	tests := []struct {
+		name     string
+		entry    string
+		patterns []string
+		want     bool
+	}{
+		{"single pattern match", "ChatterInternal", []string{"chatter"}, true},
+		{"multiple patterns second match", "CanUseNewDashboardBuilder", []string{"chatter", "canuse"}, true},
+		{"no match", "ViewAllData", []string{"chatter"}, false},
+		{"case insensitive entry", "chatterinternal", []string{"chatter"}, true},
+		{"case insensitive pattern", "ChatterInternal", []string{"chatter"}, true},
+		{"prefix match", "AdminUserCustomPermission", []string{"admin"}, true},
+		{"non-prefix substring does not match", "ViewAdminRecords", []string{"admin"}, false},
+		{"empty patterns", "Chatter", []string{}, false},
+		{"nil patterns", "Chatter", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchesExclude(tt.entry, tt.patterns)
+			if got != tt.want {
+				t.Errorf("matchesExclude(%q, %v) = %v, want %v", tt.entry, tt.patterns, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractRawEntry(t *testing.T) {
+	raw := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <userPermissions>
+        <name>ChatterInternal</name>
+        <enabled>true</enabled>
+    </userPermissions>
+    <userPermissions>
+        <name>StandardUserPerm</name>
+        <enabled>false</enabled>
+    </userPermissions>
+    <classAccesses>
+        <apexClass>MyClass</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <fieldPermissions>
+        <field>Account.Revenue__c</field>
+        <readable>true</readable>
+        <editable>false</editable>
+    </fieldPermissions>
+</Profile>`
+
+	// Found — userPermissions with name "ChatterInternal".
+	got := extractRawEntry(raw, "userPermissions", "ChatterInternal", "name")
+	if got == "" {
+		t.Fatal("expected to find ChatterInternal entry")
+	}
+	if !strings.Contains(got, "ChatterInternal") {
+		t.Error("extracted entry should contain the entry name")
+	}
+	if !strings.HasPrefix(got, "    ") {
+		t.Error("extracted entry should be 4-space indented")
+	}
+
+	// Child elements should be indented to 8 spaces, not flattened to 4.
+	if !strings.Contains(got, "        <name>ChatterInternal</name>") {
+		t.Error("extracted entry child elements should be 8-space indented, got:\n" + got)
+	}
+
+	// Found — classAccesses with name "MyClass".
+	got2 := extractRawEntry(raw, "classAccesses", "MyClass", "apexClass")
+	if got2 == "" {
+		t.Fatal("expected to find MyClass entry")
+	}
+	if !strings.Contains(got2, "MyClass") {
+		t.Error("extracted entry should contain the class name")
+	}
+
+	// Found — fieldPermissions with name "Account.Revenue__c".
+	got3 := extractRawEntry(raw, "fieldPermissions", "Account.Revenue__c", "field")
+	if got3 == "" {
+		t.Fatal("expected to find Account.Revenue__c entry")
+	}
+
+	// Not found — entry not in raw XML.
+	got4 := extractRawEntry(raw, "userPermissions", "NonExistent", "name")
+	if got4 != "" {
+		t.Error("expected empty string for non-existent entry")
+	}
+
+	// Empty raw XML.
+	got5 := extractRawEntry("", "userPermissions", "Test", "name")
+	if got5 != "" {
+		t.Error("expected empty string for empty raw XML")
+	}
+}
+
+func TestNormalizeProfileExcludePreservesOriginal(t *testing.T) {
+	ms := schema.NewMasterSchema()
+	ms.Add("userPermissions", "ChatterInternal")
+	ms.Add("userPermissions", "StandardUserPerm")
+
+	raw := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <userPermissions>
+        <name>ChatterInternal</name>
+        <enabled>false</enabled>
+    </userPermissions>
+    <userPermissions>
+        <name>StandardUserPerm</name>
+        <enabled>true</enabled>
+    </userPermissions>
+</Profile>`
+
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+	g.SetExcludePatterns([]string{"chatter"})
+
+	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	p.RawXML = raw
+	p.UserLicense = "Salesforce"
+
+	// Graph edge says ChatterInternal is enabled, but raw XML says false.
+	node := g.GetOrCreateMetadataNode(graph.MetaTypeUserPerm, "ChatterInternal")
+	g.AddEdge(p, node, graph.EdgeProperties{Enabled: boolPtr(true)})
+
+	node2 := g.GetOrCreateMetadataNode(graph.MetaTypeUserPerm, "StandardUserPerm")
+	g.AddEdge(p, node2, graph.EdgeProperties{Enabled: boolPtr(true)})
+
+	xmlBytes := NormalizeProfile(p, g)
+	output := string(xmlBytes)
+
+	// ChatterInternal should be preserved from raw XML (enabled=false),
+	// NOT marshaled with enabled=true.
+	if !strings.Contains(output, "<enabled>false</enabled>") {
+		t.Error("expected preserved ChatterInternal with enabled=false from raw XML")
+	}
+	// StandardUserPerm (not excluded) should be marshaled with enabled=true from graph.
+	if !strings.Contains(output, "<enabled>true</enabled>") {
+		t.Error("expected marshaled StandardUserPerm with enabled=true")
+	}
+}
+
+func TestNormalizeProfileExcludeDropsBackfilled(t *testing.T) {
+	ms := schema.NewMasterSchema()
+	ms.Add("userPermissions", "ChatterInternal")
+	ms.Add("userPermissions", "ChatterOwnGroups") // backfilled, not in profile
+
+	raw := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <userPermissions>
+        <name>ChatterInternal</name>
+        <enabled>true</enabled>
+    </userPermissions>
+</Profile>`
+
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+	g.SetExcludePatterns([]string{"chatter"})
+
+	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	p.RawXML = raw
+	p.UserLicense = "Salesforce"
+
+	node := g.GetOrCreateMetadataNode(graph.MetaTypeUserPerm, "ChatterInternal")
+	g.AddEdge(p, node, graph.EdgeProperties{Enabled: boolPtr(true)})
+
+	xmlBytes := NormalizeProfile(p, g)
+	output := string(xmlBytes)
+
+	// ChatterInternal (in raw XML) should be preserved.
+	if !strings.Contains(output, "ChatterInternal") {
+		t.Error("expected ChatterInternal to be in output")
+	}
+	// ChatterOwnGroups (backfilled, matches exclude, not in raw XML) should be dropped.
+	if strings.Contains(output, "ChatterOwnGroups") {
+		t.Error("expected ChatterOwnGroups (backfilled + excluded) to be dropped")
+	}
+}
+
+func TestNormalizeProfileExcludeOrdering(t *testing.T) {
+	ms := schema.NewMasterSchema()
+	ms.Add("userPermissions", "A_Normal")
+	ms.Add("userPermissions", "B_Normal")
+	ms.Add("userPermissions", "X_Excluded")
+	ms.Add("userPermissions", "Y_Excluded")
+
+	raw := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <userPermissions>
+        <name>X_Excluded</name>
+        <enabled>true</enabled>
+    </userPermissions>
+    <userPermissions>
+        <name>Y_Excluded</name>
+        <enabled>true</enabled>
+    </userPermissions>
+    <userPermissions>
+        <name>A_Normal</name>
+        <enabled>true</enabled>
+    </userPermissions>
+    <userPermissions>
+        <name>B_Normal</name>
+        <enabled>true</enabled>
+    </userPermissions>
+</Profile>`
+
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+	g.SetExcludePatterns([]string{"excluded"})
+
+	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	p.RawXML = raw
+	p.UserLicense = "Salesforce"
+
+	for _, name := range []string{"A_Normal", "B_Normal", "X_Excluded", "Y_Excluded"} {
+		node := g.GetOrCreateMetadataNode(graph.MetaTypeUserPerm, name)
+		g.AddEdge(p, node, graph.EdgeProperties{Enabled: boolPtr(true)})
+	}
+
+	xmlBytes := NormalizeProfile(p, g)
+	output := string(xmlBytes)
+
+	// All entries should be in alphabetical order: A_Normal, B_Normal, X_Excluded, Y_Excluded.
+	aIdx := strings.Index(output, "A_Normal")
+	bIdx := strings.Index(output, "B_Normal")
+	xIdx := strings.Index(output, "X_Excluded")
+	yIdx := strings.Index(output, "Y_Excluded")
+
+	if aIdx < 0 || bIdx < 0 || xIdx < 0 || yIdx < 0 {
+		t.Fatal("all entries should be present in output")
+	}
+	if !(aIdx < bIdx && bIdx < xIdx && xIdx < yIdx) {
+		t.Error("entries should be in alphabetical order: A_Normal < B_Normal < X_Excluded < Y_Excluded")
+	}
+}
+
+func TestNormalizeProfileExcludeNoEffectWhenOmitted(t *testing.T) {
+	ms := schema.NewMasterSchema()
+	ms.Add("userPermissions", "ChatterInternal")
+	ms.Add("userPermissions", "StandardUserPerm")
+
+	raw := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <userPermissions>
+        <name>ChatterInternal</name>
+        <enabled>false</enabled>
+    </userPermissions>
+    <userPermissions>
+        <name>StandardUserPerm</name>
+        <enabled>false</enabled>
+    </userPermissions>
+</Profile>`
+
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+	// Deliberately NOT setting ExcludePatterns.
+
+	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	p.RawXML = raw
+	p.UserLicense = "Salesforce"
+
+	for _, name := range []string{"ChatterInternal", "StandardUserPerm"} {
+		node := g.GetOrCreateMetadataNode(graph.MetaTypeUserPerm, name)
+		g.AddEdge(p, node, graph.EdgeProperties{Enabled: boolPtr(true)})
+	}
+
+	xmlBytes := NormalizeProfile(p, g)
+	output := string(xmlBytes)
+
+	// Both entries should be marshaled (enabled=true from graph), not preserved from raw XML.
+	if !strings.Contains(output, "<enabled>true</enabled>") {
+		t.Error("expected all entries to be marshaled with enabled=true from graph")
+	}
+}
+
 func strPtr(s string) *string { return &s }
 
 func boolPtr(b bool) *bool { return &b }

@@ -42,8 +42,8 @@ func TestJSONExporter(t *testing.T) {
 	if !nodeIDs["ApexClass:MyClass"] {
 		t.Error("missing ApexClass:MyClass node")
 	}
-	if !nodeIDs["Field:Account.Name"] {
-		t.Error("missing Field:Account.Name node")
+	if !nodeIDs["CustomField:Account.Name"] {
+		t.Error("missing CustomField:Account.Name node")
 	}
 
 	// Verify edges have properties preserved

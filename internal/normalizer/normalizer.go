@@ -22,6 +22,30 @@ var (
 	reProfileActionOvr = regexp.MustCompile(`(?s)<profileActionOverrides>.*?</profileActionOverrides>`)
 )
 
+// sectionNameField maps each profile section XML tag to the XML element name
+// used for the entry's identifying name within that section. Used by
+// extractRawEntry to locate specific entries in raw profile XML.
+var sectionNameField = map[string]string{
+	"classAccesses":                 "apexClass",
+	"agentAccesses":                 "agent",
+	"applicationVisibilities":       "application",
+	"categoryGroupVisibilities":     "dataCategoryGroup",
+	"customMetadataTypeAccesses":    "name",
+	"customPermissions":             "name",
+	"customSettingAccesses":         "name",
+	"fieldPermissions":              "field",
+	"layoutAssignments":             "layout",
+	"objectPermissions":             "object",
+	"pageAccesses":                  "apexPage",
+	"recordTypeVisibilities":        "recordType",
+	"servicePresenceStatusAccesses": "servicePresenceStatus",
+	"tabVisibilities":               "tab",
+	"userPermissions":               "name",
+	"flowAccesses":                  "flow",
+	"externalDataSourceAccesses":    "externalDataSource",
+	"genComputingSummaryDefAccess":  "enhancedSummaryDef",
+}
+
 // -- XML marshaling structs for each section type.
 
 type classAccessXML struct {
@@ -149,6 +173,8 @@ type NormalizeGraph interface {
 	ProfileEdges(p *graph.ProfileNode) []*graph.Edge
 	MasterSchema() graph.MasterSchemaProvider
 	AvailableLayouts() []string
+	OrgSchema() graph.OrgSchemaProvider
+	ExcludePatterns() []string
 }
 
 // -- DefaultEdgeProperties
@@ -267,6 +293,18 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 			}
 		}
 
+		// Org schema filtering: if org schema is active for this type, skip
+		// entries that don't exist in the org (overrides all other checks).
+		if os := g.OrgSchema(); os != nil && os.HasType(string(metaType)) {
+			filtered := make([]nameAndProps, 0, len(entries))
+			for _, e := range entries {
+				if os.Has(string(metaType), e.name) {
+					filtered = append(filtered, e)
+				}
+			}
+			entries = filtered
+		}
+
 		if len(entries) == 0 {
 			continue
 		}
@@ -304,8 +342,21 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 			entries = filtered
 		}
 
-		// Marshal each entry.
+		// Marshal entries in sorted order; excluded entries preserve original XML.
+		patterns := g.ExcludePatterns()
+		nameField, hasNameField := sectionNameField[sectionTag]
 		for _, e := range entries {
+			if len(patterns) > 0 && matchesExclude(e.name, patterns) {
+				// Excluded entry: preserve original XML if it exists, otherwise drop.
+				if hasNameField {
+					raw := extractRawEntry(p.RawXML, sectionTag, e.name, nameField)
+					if raw != "" {
+						buf.WriteString(raw)
+					}
+				}
+				// If no nameField mapping or entry not in raw XML, silently drop.
+				continue
+			}
 			xmlBytes, err := marshalEntry(sectionTag, e.name, e.props)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "warning: marshal %s/%s: %v\n", sectionTag, e.name, err)
@@ -439,6 +490,36 @@ func objectFromLayoutName(layoutName string) string {
 	return layoutName
 }
 
+// matchesExclude returns true if the entry name starts with any of the exclude
+// patterns (case-insensitive prefix match). Patterns are expected to be
+// pre-lowercased by the caller.
+func matchesExclude(name string, patterns []string) bool {
+	lowerName := strings.ToLower(name)
+	for _, p := range patterns {
+		if strings.HasPrefix(lowerName, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// extractRawEntry finds a single <sectionTag>...</sectionTag> element in rawXML
+// whose name child element matches entryName, and returns it with 4-space
+// indentation. Returns empty string if not found.
+func extractRawEntry(rawXML, sectionTag, entryName, nameField string) string {
+	if rawXML == "" || sectionTag == "" || nameField == "" {
+		return ""
+	}
+	re := regexp.MustCompile(`(?s)<` + sectionTag + `>.*?</` + sectionTag + `>`)
+	nameMarker := "<" + nameField + ">" + entryName + "</" + nameField + ">"
+	for _, block := range re.FindAllString(rawXML, -1) {
+		if strings.Contains(block, nameMarker) {
+			return reindentEntry(block)
+		}
+	}
+	return ""
+}
+
 // extractUnmappedSections extracts unmapped sections from raw XML for preservation.
 // These sections are not modeled in the graph but must be preserved verbatim.
 func extractUnmappedSections(rawXML string) string {
@@ -464,6 +545,42 @@ func indentXMLSection(s string) string {
 			continue
 		}
 		buf.WriteString("    " + trimmed + "\n")
+	}
+	return buf.String()
+}
+
+// reindentEntry normalizes an extracted XML block to 4-space base indentation
+// while preserving the relative depth of child elements. The regex capture
+// strips the opening tag's leading whitespace, so the first line is set to
+// 4 spaces; all other lines are shifted by (4 - closingTagIndent).
+func reindentEntry(block string) string {
+	lines := strings.Split(block, "\n")
+	// Find the closing tag's indentation (last non-empty line).
+	baseIndent := 0
+	for i := len(lines) - 1; i >= 0; i-- {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed != "" {
+			baseIndent = len(lines[i]) - len(trimmed)
+			break
+		}
+	}
+	shift := 4 - baseIndent
+	var buf bytes.Buffer
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if i == 0 {
+			buf.WriteString("    " + trimmed + "\n")
+		} else {
+			currentIndent := len(line) - len(strings.TrimLeft(line, " \t"))
+			newIndent := currentIndent + shift
+			if newIndent < 0 {
+				newIndent = 0
+			}
+			buf.WriteString(strings.Repeat(" ", newIndent) + trimmed + "\n")
+		}
 	}
 	return buf.String()
 }
