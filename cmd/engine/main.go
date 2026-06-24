@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"xml2l/internal/converter"
 	"xml2l/internal/normalizer"
 	"xml2l/internal/orgschema"
 	reportpkg "xml2l/internal/report"
@@ -42,6 +43,7 @@ func newProfileCmd() *cobra.Command {
 	cmd.AddCommand(
 		newDiffCmd(),
 		newSaveCmd(),
+		newConvertCmd(),
 	)
 	return cmd
 }
@@ -191,7 +193,7 @@ func newSaveCmd() *cobra.Command {
 			if err := normalizer.WriteProfiles(g); err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "Profiles saved.\n")
+			fmt.Fprintf(os.Stderr, "Done. Profiles saved.\n")
 			return nil
 		},
 	}
@@ -199,5 +201,53 @@ func newSaveCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&useOrgSchema, "use-org-schema", "s", false, "Cross-check metadata against Salesforce org schema before saving")
 	cmd.Flags().StringVarP(&orgFlag, "org", "o", "", "Salesforce org alias (default: SF CLI default org)")
 	cmd.Flags().StringVarP(&excludeFlag, "exclude", "e", "", "Comma-separated case-insensitive substrings; matching entries skip normalization and preserve original XML (requires --use-org-schema)")
+	return cmd
+}
+
+func newConvertCmd() *cobra.Command {
+	profileFlag := ""
+	profilesFlag := ""
+
+	cmd := &cobra.Command{
+		Use:   "convert",
+		Short: "Convert profile XML to YAML (1:1, no normalization)",
+		Long: `Converts .profile-meta.xml files to YAML preserving the original
+XML structure exactly — no normalization, no schema cross-check, no sorting.
+
+Output files are written as siblings to the source with a .profile-meta.yaml
+extension. The source XML files are not modified.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectPath, _ := cmd.Flags().GetString("path")
+			if projectPath == "" {
+				return fmt.Errorf("required flag --path / -p is missing")
+			}
+
+			// Discover profiles.
+			profiles, err := converter.FindAndFilter(projectPath, profileFlag, profilesFlag)
+			if err != nil {
+				return err
+			}
+
+			for _, profilePath := range profiles {
+				outPath, yamlBytes, err := converter.ConvertFile(profilePath)
+				if err != nil {
+					return fmt.Errorf("Convert %s: %w", profilePath, err)
+				}
+
+				if err := os.WriteFile(outPath, yamlBytes, 0644); err != nil {
+					return fmt.Errorf("Write %s: %w", outPath, err)
+				}
+				fmt.Fprintf(os.Stderr, "Converted: %s\n", filepath.Base(profilePath))
+			}
+
+			fmt.Fprintf(os.Stderr, "Done. %d profile(s) converted.\n", len(profiles))
+			return nil
+		},
+	}
+
+	addPathFlag(cmd)
+	cmd.Flags().StringVarP(&profileFlag, "profile", "r", "", "Convert a single profile by name (mutually exclusive with --profiles)")
+	cmd.Flags().StringVarP(&profilesFlag, "profiles", "l", "", "Comma-separated list of profile names to convert (mutually exclusive with --profile)")
+	cmd.MarkFlagsMutuallyExclusive("profile", "profiles")
 	return cmd
 }
