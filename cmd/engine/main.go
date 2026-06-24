@@ -72,6 +72,7 @@ Tags present in every profile are suppressed (shared). Use --details to also sho
 permission value differences for shared tags. Use --export to write the report to a file.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectPath, _ := cmd.Flags().GetString("path")
+
 			if projectPath == "" {
 				return fmt.Errorf("required flag --path / -p is missing")
 			}
@@ -93,6 +94,7 @@ permission value differences for shared tags. Use --export to write the report t
 						break
 					}
 				}
+
 				if !hasAdmin {
 					return fmt.Errorf("--details requires an Admin profile; none found in %s", projectPath)
 				}
@@ -107,6 +109,7 @@ permission value differences for shared tags. Use --export to write the report t
 
 			if export != "" || exportFmt != "text" {
 				outPath := exportOut
+
 				if outPath == "" {
 					base := deriveExportBase(projectPath)
 					ext := "json"
@@ -130,9 +133,10 @@ permission value differences for shared tags. Use --export to write the report t
 					return fmt.Errorf("unsupported export format: %s (supported: json, text)", exportFmtVal)
 				}
 
-				if err := os.WriteFile(outPath, []byte(content), 0644); err != nil {
+				if err := os.WriteFile(outPath, []byte(content), 0o644); err != nil {
 					return fmt.Errorf("write %s: %w", outPath, err)
 				}
+
 				fmt.Println(outPath)
 				return nil
 			}
@@ -172,27 +176,32 @@ func newSaveCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+
 				g.SetOrgSchema(os)
 			}
 
 			// Exclude flag: skip normalization for entries matching patterns.
 			var excludePatterns []string
+
 			if excludeFlag != "" {
 				if !useOrgSchema {
 					return fmt.Errorf("--exclude / -e requires --use-org-schema / -s")
 				}
+
 				for _, term := range strings.Split(excludeFlag, ",") {
 					trimmed := strings.TrimSpace(strings.ToLower(term))
 					if trimmed != "" {
 						excludePatterns = append(excludePatterns, trimmed)
 					}
 				}
+
 				g.SetExcludePatterns(excludePatterns)
 			}
 
 			if err := normalizer.WriteProfiles(g); err != nil {
 				return err
 			}
+
 			fmt.Fprintf(os.Stderr, "Done. Profiles saved.\n")
 			return nil
 		},
@@ -218,30 +227,12 @@ Output files are written as siblings to the source with a .profile-meta.yaml
 extension. The source XML files are not modified.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectPath, _ := cmd.Flags().GetString("path")
+
 			if projectPath == "" {
 				return fmt.Errorf("required flag --path / -p is missing")
 			}
 
-			// Discover profiles.
-			profiles, err := converter.FindAndFilter(projectPath, profileFlag, profilesFlag)
-			if err != nil {
-				return err
-			}
-
-			for _, profilePath := range profiles {
-				outPath, yamlBytes, err := converter.ConvertFile(profilePath)
-				if err != nil {
-					return fmt.Errorf("Convert %s: %w", profilePath, err)
-				}
-
-				if err := os.WriteFile(outPath, yamlBytes, 0644); err != nil {
-					return fmt.Errorf("Write %s: %w", outPath, err)
-				}
-				fmt.Fprintf(os.Stderr, "Converted: %s\n", filepath.Base(profilePath))
-			}
-
-			fmt.Fprintf(os.Stderr, "Done. %d profile(s) converted.\n", len(profiles))
-			return nil
+			return converter.ConvertProfiles(projectPath, profileFlag, profilesFlag)
 		},
 	}
 

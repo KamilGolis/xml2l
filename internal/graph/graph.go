@@ -100,6 +100,67 @@ type SalesforceGraph struct {
 	excludePatterns  []string
 }
 
+// SectionMeta maps an XML section tag to its corresponding MetadataType.
+type SectionMeta struct {
+	Tag      string
+	MetaType MetadataType
+}
+
+// sectionOrder defines the canonical ordering of all supported profile XML
+// section types and their MetadataType correspondence.
+var sectionOrder = []SectionMeta{
+	{"agentAccesses", MetaTypeAgent},
+	{"applicationVisibilities", MetaTypeApp},
+	{"categoryGroupVisibilities", MetaTypeCategoryGroup},
+	{"classAccesses", MetaTypeApexClass},
+	{"customMetadataTypeAccesses", MetaTypeCustomMetadataType},
+	{"customPermissions", MetaTypeCustomPermission},
+	{"customSettingAccesses", MetaTypeCustomSetting},
+	{"externalDataSourceAccesses", MetaTypeExternalDataSource},
+	{"fieldPermissions", MetaTypeField},
+	{"flowAccesses", MetaTypeFlow},
+	{"genComputingSummaryDefAccess", MetaTypeGenComputingSummaryDef},
+	{"layoutAssignments", MetaTypeLayout},
+	{"objectPermissions", MetaTypeObject},
+	{"pageAccesses", MetaTypePage},
+	{"recordTypeVisibilities", MetaTypeRecordType},
+	{"servicePresenceStatusAccesses", MetaTypeServicePresenceStatus},
+	{"tabVisibilities", MetaTypeTab},
+	{"userPermissions", MetaTypeUserPerm},
+}
+
+// DirMapping describes filesystem mapping for a metadata type.
+type DirMapping struct {
+	Dir       string
+	Patterns  []string
+	Recursive bool
+}
+
+// metaTypeDirMap defines the filesystem layout for each metadata type.
+var metaTypeDirMap = map[MetadataType]DirMapping{
+	MetaTypeApexClass:          {Dir: "classes", Patterns: []string{"*.cls", "*.cls-meta.xml"}, Recursive: true},
+	MetaTypeApp:                {Dir: "apps", Patterns: []string{"*.app", "*.app-meta.xml"}},
+	MetaTypeTab:                {Dir: "tabs", Patterns: []string{"*.tab", "*.tab-meta.xml"}},
+	MetaTypeLayout:             {Dir: "layouts", Patterns: []string{"*.layout"}},
+	MetaTypeCustomPermission:   {Dir: "customPermissions", Patterns: []string{"*.customPermission", "*.customPermission-meta.xml"}},
+	MetaTypeFlow:               {Dir: "flows", Patterns: []string{"*.flow-meta.xml"}},
+	MetaTypePage:               {Dir: "pages", Patterns: []string{"*.page", "*.page-meta.xml"}},
+	MetaTypeObject:             {Dir: "objects", Patterns: []string{"*.object-meta.xml"}},
+	MetaTypeCustomSetting:      {Dir: "objects", Patterns: []string{"*__c.object-meta.xml"}},
+	MetaTypeCustomMetadataType: {Dir: "objects", Patterns: []string{"*__mdt.object-meta.xml"}},
+}
+
+// ObjectSubDirs lists subdirectories under objects/<Name>/ that correspond to
+// profile permission types with their MetadataType and glob pattern.
+var ObjectSubDirs = []struct {
+	SubDir   string
+	MetaType MetadataType
+	Pattern  string
+}{
+	{SubDir: "fields", MetaType: MetaTypeField, Pattern: "*.field-meta.xml"},
+	{SubDir: "recordTypes", MetaType: MetaTypeRecordType, Pattern: "*.recordType-meta.xml"},
+}
+
 // NewGraph creates an empty SalesforceGraph.
 func NewGraph() *SalesforceGraph {
 	return &SalesforceGraph{
@@ -117,8 +178,10 @@ func (g *SalesforceGraph) AddProfile(name, path string) *ProfileNode {
 	if existing, ok := g.ProfileNodes[name]; ok {
 		return existing
 	}
+
 	p := &ProfileNode{Name: name, SourcePath: path}
 	g.ProfileNodes[name] = p
+
 	return p
 }
 
@@ -129,8 +192,10 @@ func (g *SalesforceGraph) GetOrCreateMetadataNode(metaType MetadataType, name st
 	if existing, ok := g.MetadataNodes[key]; ok {
 		return existing
 	}
+
 	m := &MetadataNode{Name: name, MetaType: metaType}
 	g.MetadataNodes[key] = m
+
 	return m
 }
 
@@ -142,18 +207,22 @@ func (g *SalesforceGraph) AddEdge(p *ProfileNode, m *MetadataNode, props EdgePro
 		MetadataNode: m,
 		Properties:   props,
 	}
+
 	g.Edges = append(g.Edges, e)
 	g.ProfileToEdges[p] = append(g.ProfileToEdges[p], e)
 	g.MetaToEdges[m] = append(g.MetaToEdges[m], e)
+
 	return e
 }
 
 // Profiles returns all ProfileNodes in the graph as a slice.
 func (g *SalesforceGraph) Profiles() []*ProfileNode {
 	r := make([]*ProfileNode, 0, len(g.ProfileNodes))
+
 	for _, p := range g.ProfileNodes {
 		r = append(r, p)
 	}
+
 	return r
 }
 
@@ -203,37 +272,6 @@ func (g *SalesforceGraph) ExcludePatterns() []string {
 	return g.excludePatterns
 }
 
-// -- Canonical metadata type registry
-
-// SectionMeta maps an XML section tag to its corresponding MetadataType.
-type SectionMeta struct {
-	Tag      string
-	MetaType MetadataType
-}
-
-// sectionOrder defines the canonical ordering of all supported profile XML
-// section types and their MetadataType correspondence.
-var sectionOrder = []SectionMeta{
-	{"agentAccesses", MetaTypeAgent},
-	{"applicationVisibilities", MetaTypeApp},
-	{"categoryGroupVisibilities", MetaTypeCategoryGroup},
-	{"classAccesses", MetaTypeApexClass},
-	{"customMetadataTypeAccesses", MetaTypeCustomMetadataType},
-	{"customPermissions", MetaTypeCustomPermission},
-	{"customSettingAccesses", MetaTypeCustomSetting},
-	{"externalDataSourceAccesses", MetaTypeExternalDataSource},
-	{"fieldPermissions", MetaTypeField},
-	{"flowAccesses", MetaTypeFlow},
-	{"genComputingSummaryDefAccess", MetaTypeGenComputingSummaryDef},
-	{"layoutAssignments", MetaTypeLayout},
-	{"objectPermissions", MetaTypeObject},
-	{"pageAccesses", MetaTypePage},
-	{"recordTypeVisibilities", MetaTypeRecordType},
-	{"servicePresenceStatusAccesses", MetaTypeServicePresenceStatus},
-	{"tabVisibilities", MetaTypeTab},
-	{"userPermissions", MetaTypeUserPerm},
-}
-
 // SectionMetaOrder returns a copy of the canonical section ordering.
 func SectionMetaOrder() []SectionMeta {
 	return append([]SectionMeta(nil), sectionOrder...)
@@ -244,9 +282,11 @@ var tagMetaType = buildTagMetaType()
 
 func buildTagMetaType() map[string]MetadataType {
 	m := make(map[string]MetadataType, len(sectionOrder))
+
 	for _, sm := range sectionOrder {
 		m[sm.Tag] = sm.MetaType
 	}
+
 	return m
 }
 
@@ -256,28 +296,8 @@ func TagToMetaType(tag string) MetadataType {
 	if mt, ok := tagMetaType[tag]; ok {
 		return mt
 	}
+
 	return MetadataType(tag)
-}
-
-// DirMapping describes filesystem mapping for a metadata type.
-type DirMapping struct {
-	Dir       string
-	Patterns  []string
-	Recursive bool
-}
-
-// metaTypeDirMap defines the filesystem layout for each metadata type.
-var metaTypeDirMap = map[MetadataType]DirMapping{
-	MetaTypeApexClass:          {Dir: "classes", Patterns: []string{"*.cls", "*.cls-meta.xml"}, Recursive: true},
-	MetaTypeApp:                {Dir: "apps", Patterns: []string{"*.app", "*.app-meta.xml"}},
-	MetaTypeTab:                {Dir: "tabs", Patterns: []string{"*.tab", "*.tab-meta.xml"}},
-	MetaTypeLayout:             {Dir: "layouts", Patterns: []string{"*.layout"}},
-	MetaTypeCustomPermission:   {Dir: "customPermissions", Patterns: []string{"*.customPermission", "*.customPermission-meta.xml"}},
-	MetaTypeFlow:               {Dir: "flows", Patterns: []string{"*.flow-meta.xml"}},
-	MetaTypePage:               {Dir: "pages", Patterns: []string{"*.page", "*.page-meta.xml"}},
-	MetaTypeObject:             {Dir: "objects", Patterns: []string{"*.object-meta.xml"}},
-	MetaTypeCustomSetting:      {Dir: "objects", Patterns: []string{"*__c.object-meta.xml"}},
-	MetaTypeCustomMetadataType: {Dir: "objects", Patterns: []string{"*__mdt.object-meta.xml"}},
 }
 
 // DirMappingFor returns the filesystem directory mapping for a metadata type.
@@ -290,15 +310,4 @@ func DirMappingFor(mt MetadataType) (DirMapping, bool) {
 // MetaTypeDirMap returns the full metadata-type-to-directory mapping.
 func MetaTypeDirMap() map[MetadataType]DirMapping {
 	return metaTypeDirMap
-}
-
-// ObjectSubDirs lists subdirectories under objects/<Name>/ that correspond to
-// profile permission types with their MetadataType and glob pattern.
-var ObjectSubDirs = []struct {
-	SubDir   string
-	MetaType MetadataType
-	Pattern  string
-}{
-	{SubDir: "fields", MetaType: MetaTypeField, Pattern: "*.field-meta.xml"},
-	{SubDir: "recordTypes", MetaType: MetaTypeRecordType, Pattern: "*.recordType-meta.xml"},
 }

@@ -13,6 +13,7 @@ import (
 func TestDefaultEdgeProperties(t *testing.T) {
 	t.Run("apex class", func(t *testing.T) {
 		p := DefaultEdgeProperties(graph.MetaTypeApexClass)
+
 		if p.Enabled == nil || *p.Enabled != false {
 			t.Error("expected Enabled=false")
 		}
@@ -20,9 +21,11 @@ func TestDefaultEdgeProperties(t *testing.T) {
 
 	t.Run("field permissions", func(t *testing.T) {
 		p := DefaultEdgeProperties(graph.MetaTypeField)
+
 		if p.Readable == nil || *p.Readable != false {
 			t.Error("expected Readable=false")
 		}
+
 		if p.Editable == nil || *p.Editable != false {
 			t.Error("expected Editable=false")
 		}
@@ -30,9 +33,11 @@ func TestDefaultEdgeProperties(t *testing.T) {
 
 	t.Run("object permissions", func(t *testing.T) {
 		p := DefaultEdgeProperties(graph.MetaTypeObject)
+
 		if p.AllowCreate == nil || *p.AllowCreate != false {
 			t.Error("expected AllowCreate=false")
 		}
+
 		if p.ViewAll == nil || *p.ViewAll != false {
 			t.Error("expected ViewAll=false")
 		}
@@ -40,9 +45,11 @@ func TestDefaultEdgeProperties(t *testing.T) {
 
 	t.Run("application visibility", func(t *testing.T) {
 		p := DefaultEdgeProperties(graph.MetaTypeApp)
+
 		if p.Visible == nil || *p.Visible != false {
 			t.Error("expected Visible=false")
 		}
+
 		if p.Default == nil || *p.Default != false {
 			t.Error("expected Default=false")
 		}
@@ -57,9 +64,11 @@ func TestMarshalEntry(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if !strings.Contains(string(out), "<apexClass>MyClass</apexClass>") {
 			t.Errorf("missing apexClass in output: %s", out)
 		}
+
 		if !strings.Contains(string(out), "<enabled>true</enabled>") {
 			t.Errorf("missing enabled=true in output: %s", out)
 		}
@@ -72,9 +81,11 @@ func TestMarshalEntry(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if !strings.Contains(string(out), "<field>Account.Revenue__c</field>") {
 			t.Errorf("missing field: %s", out)
 		}
+
 		if !strings.Contains(string(out), "<readable>false</readable>") {
 			t.Errorf("expected readable=false: %s", out)
 		}
@@ -86,6 +97,7 @@ func TestMarshalEntry(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if !strings.Contains(string(out), "<visibility>DefaultOn</visibility>") {
 			t.Errorf("expected visibility=DefaultOn: %s", out)
 		}
@@ -97,13 +109,16 @@ func TestMarshalEntry(t *testing.T) {
 			AllowEdit: &[]bool{false}[0], AllowDelete: &[]bool{false}[0],
 			ModifyAll: &[]bool{false}[0], ViewAll: &[]bool{false}[0],
 		}
+
 		out, err := marshalEntry("objectPermissions", "Account", p)
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if !strings.Contains(string(out), "<modifyAllRecords>false</modifyAllRecords>") {
 			t.Errorf("expected modifyAllRecords=false, got: %s", out)
 		}
+
 		if !strings.Contains(string(out), "<viewAllRecords>false</viewAllRecords>") {
 			t.Errorf("expected viewAllRecords=false, got: %s", out)
 		}
@@ -116,9 +131,11 @@ func TestMarshalEntry(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if !strings.Contains(string(out), "<apexPage>MyPage</apexPage>") {
 			t.Errorf("missing apexPage in output: %s", out)
 		}
+
 		if !strings.Contains(string(out), "<enabled>true</enabled>") {
 			t.Errorf("missing enabled=true in output: %s", out)
 		}
@@ -149,6 +166,7 @@ func TestNormalizeProfileBackfill(t *testing.T) {
 	if !strings.Contains(output, "Account.Existing__c") {
 		t.Error("missing existing field")
 	}
+
 	if !strings.Contains(output, "<readable>true</readable>") {
 		t.Error("existing field should have readable=true")
 	}
@@ -157,6 +175,7 @@ func TestNormalizeProfileBackfill(t *testing.T) {
 	if !strings.Contains(output, "Account.Revenue__c") {
 		t.Error("missing backfilled field")
 	}
+
 	if !strings.Contains(output, "<readable>false</readable>") {
 		t.Error("backfilled field should have readable=false")
 	}
@@ -193,6 +212,7 @@ func TestNormalizeProfileLayoutNoBackfill(t *testing.T) {
 	if strings.Contains(output, "Account-Sales Layout") {
 		t.Error("layoutAssignments should not be backfilled from Master Schema")
 	}
+
 	if strings.Contains(output, "Contact-Patient Layout") {
 		t.Error("layoutAssignments should not be backfilled from Master Schema")
 	}
@@ -224,9 +244,11 @@ func TestNormalizeProfileLayoutSortByRecordType(t *testing.T) {
 	if rtNonePos < 0 {
 		t.Fatal("missing layout entry without recordType")
 	}
+
 	if rt1Pos < 0 || rt2Pos < 0 {
 		t.Fatal("missing layout entries with recordTypes")
 	}
+
 	if !(rtNonePos < rt1Pos && rt1Pos < rt2Pos) {
 		t.Errorf("layout entries not sorted by recordType: none=%d, RT1=%d, RT2=%d", rtNonePos, rt1Pos, rt2Pos)
 	}
@@ -250,9 +272,11 @@ func TestNormalizeProfileLayoutDefaultFromDisk(t *testing.T) {
 	if !strings.Contains(output, "Account-Account Layout") {
 		t.Error("expected default Account-Account Layout for Account object")
 	}
+
 	if strings.Contains(output, "Account-HCO Layout") {
 		t.Error("should not add second Account layout as default")
 	}
+
 	if !strings.Contains(output, "Contact-Patient Layout") {
 		t.Error("expected default Contact-Patient Layout for Contact object")
 	}
@@ -279,9 +303,11 @@ func TestNormalizeProfileLayoutNoDefaultWhenEntriesExist(t *testing.T) {
 	if !strings.Contains(output, "Account-Custom Layout") {
 		t.Error("existing Account layout should be kept")
 	}
+
 	if strings.Contains(output, "Account-Account Layout") {
 		t.Error("should not add default Account layout when profile already has Account entries")
 	}
+
 	if !strings.Contains(output, "Contact-Patient Layout") {
 		t.Error("expected default Contact layout — profile has no Contact entries")
 	}
@@ -306,9 +332,11 @@ func TestNormalizeProfileLayoutFiltersMultipleNoRecordType(t *testing.T) {
 	for _, l := range layouts {
 		node := g.GetOrCreateMetadataNode(graph.MetaTypeLayout, l.name)
 		var rtPtr *string
+
 		if l.rt != "" {
 			rtPtr = &l.rt
 		}
+
 		g.AddEdge(p, node, graph.EdgeProperties{RecordType: rtPtr})
 	}
 
@@ -318,15 +346,19 @@ func TestNormalizeProfileLayoutFiltersMultipleNoRecordType(t *testing.T) {
 	if !strings.Contains(output, "Account-Account Layout") {
 		t.Error("expected Account-Account Layout (first no-RT) to be kept")
 	}
+
 	if strings.Contains(output, "Account-Sales Layout") {
 		t.Error("Account-Sales Layout (no-RT, not first) should be filtered")
 	}
+
 	if strings.Contains(output, "Account-Other Layout") {
 		t.Error("Account-Other Layout (no-RT, not first) should be filtered")
 	}
+
 	if !strings.Contains(output, "Account-HCO Layout") {
 		t.Error("Account-HCO Layout (with RT) should be kept")
 	}
+
 	if !strings.Contains(output, "Account-HCS Layout") {
 		t.Error("Account-HCS Layout (with RT) should be kept")
 	}
@@ -350,9 +382,11 @@ func TestNormalizeProfileLayoutDedupRecordTypes(t *testing.T) {
 	if !strings.Contains(output, "Account-Alpha Layout") {
 		t.Error("expected Account-Alpha Layout (first with RT) to be kept")
 	}
+
 	if strings.Contains(output, "Account-Beta Layout") {
 		t.Error("Account-Beta Layout (duplicate recordType) should be filtered")
 	}
+
 	if strings.Count(output, "Account.HCO") != 1 {
 		t.Errorf("expected exactly 1 occurrence of Account.HCO recordType, got %d", strings.Count(output, "Account.HCO"))
 	}
@@ -371,6 +405,7 @@ func TestNormalizeProfileXMLHeader(t *testing.T) {
 	if !strings.HasPrefix(output, `<?xml version="1.0" encoding="UTF-8"?>`) {
 		t.Errorf("XML should start with header, got: %s", output[:50])
 	}
+
 	if !strings.Contains(output, `<Profile xmlns="http://soap.sforce.com/2006/04/metadata">`) {
 		t.Error("missing Profile root element with namespace")
 	}
@@ -404,22 +439,28 @@ func TestExtractUnmappedSections(t *testing.T) {
 	if !strings.Contains(unmapped, "loginHours") {
 		t.Error("missing loginHours")
 	}
+
 	if !strings.Contains(unmapped, "loginIpRanges") {
 		t.Error("missing loginIpRanges")
 	}
+
 	if !strings.Contains(unmapped, "loginFlows") {
 		t.Error("missing loginFlows")
 	}
+
 	if !strings.Contains(unmapped, "profileActionOverrides") {
 		t.Error("missing profileActionOverrides")
 	}
+
 	if !strings.Contains(unmapped, "Monday") {
 		t.Error("missing loginHours content")
 	}
+
 	// Verify both loginIpRanges entries are preserved.
 	if strings.Count(unmapped, "    <loginIpRanges>") != 2 {
 		t.Errorf("expected 2 loginIpRanges entries, got %d", strings.Count(unmapped, "    <loginIpRanges>"))
 	}
+
 	if !strings.Contains(unmapped, "MyFlow") {
 		t.Error("missing loginFlows content")
 	}
@@ -429,6 +470,7 @@ func TestExtractUnmappedSectionsEmpty(t *testing.T) {
 	if got := extractUnmappedSections(""); got != "" {
 		t.Errorf("expected empty, got %q", got)
 	}
+
 	if got := extractUnmappedSections("<Profile/>"); got != "" {
 		t.Errorf("expected empty for Profile-only, got %q", got)
 	}
@@ -458,6 +500,7 @@ func TestNormalizeProfilePreservesLoginHours(t *testing.T) {
 	if !strings.Contains(output, "loginHours") {
 		t.Error("loginHours section was not preserved")
 	}
+
 	if !strings.Contains(output, "Monday") {
 		t.Error("loginHours content was not preserved")
 	}
@@ -487,9 +530,11 @@ func TestNormalizeProfilePreservesLoginFlows(t *testing.T) {
 	if !strings.Contains(output, "loginFlows") {
 		t.Error("loginFlows section was not preserved")
 	}
+
 	if !strings.Contains(output, "LoginFlow") {
 		t.Error("loginFlows flowType was not preserved")
 	}
+
 	if !strings.Contains(output, "TestFlow") {
 		t.Error("loginFlows flow was not preserved")
 	}
@@ -508,6 +553,7 @@ func TestWriteProfiles(t *testing.T) {
 	// doesn't panic with empty/nil profiles.
 	// WriteProfiles will skip profiles with empty SourcePath.
 	emptyGraph := graph.NewGraph()
+
 	if err := WriteProfiles(emptyGraph); err != nil {
 		t.Errorf("WriteProfiles empty: %v", err)
 	}
@@ -530,14 +576,17 @@ func TestNormalizeProfileValidXML(t *testing.T) {
 	// Parse back to verify it's well-formed XML.
 	decoder := xml.NewDecoder(bytes.NewReader(xmlBytes))
 	tokenCount := 0
+
 	for {
 		tok, err := decoder.Token()
 		if err != nil {
 			break
 		}
+
 		_ = tok
 		tokenCount++
 	}
+
 	if tokenCount == 0 {
 		t.Error("no tokens parsed — invalid XML")
 	}
@@ -564,6 +613,7 @@ func TestNormalizeProfileTabVisBackfillNoEmptyTag(t *testing.T) {
 	if strings.Contains(output, "<visibility></visibility>") {
 		t.Error("backfilled tab entry should not emit empty visibility tag")
 	}
+
 	if strings.Contains(output, "<visibility/>") {
 		t.Error("backfilled tab entry should not emit self-closing visibility tag")
 	}
@@ -589,6 +639,7 @@ func TestNormalizeProfileAlphabeticalSort(t *testing.T) {
 	if aPos < 0 || mPos < 0 || zPos < 0 {
 		t.Fatal("missing expected field entries")
 	}
+
 	if !(aPos < mPos && mPos < zPos) {
 		t.Error("fields not in alphabetical order: A < M < Z expected")
 	}
@@ -603,10 +654,13 @@ func (m *mockOrgSchema) Has(xmlName, fullName string) bool {
 	if m == nil {
 		return false
 	}
+
 	names, ok := m.entries[xmlName]
+
 	if !ok {
 		return false
 	}
+
 	return names[fullName]
 }
 
@@ -614,7 +668,9 @@ func (m *mockOrgSchema) HasType(xmlName string) bool {
 	if m == nil {
 		return false
 	}
+
 	_, ok := m.entries[xmlName]
+
 	return ok
 }
 
@@ -647,9 +703,11 @@ func TestNormalizeProfileOrgSchemaFiltersApexClass(t *testing.T) {
 	if !strings.Contains(output, "ClassA") {
 		t.Error("expected ClassA (present in org) to be in output")
 	}
+
 	if strings.Contains(output, "ClassB") {
 		t.Error("ClassB (not in org) should be filtered out")
 	}
+
 	if strings.Contains(output, "ClassC") {
 		t.Error("ClassC (not in org) should be filtered out")
 	}
@@ -678,14 +736,15 @@ func TestNormalizeProfileOrgSchemaFiltersLayouts(t *testing.T) {
 	if !strings.Contains(output, "Account-Account Layout") {
 		t.Error("expected Account-Account Layout (in org) to be in output")
 	}
+
 	if strings.Contains(output, "Account-Other Layout") {
 		t.Error("Account-Other Layout (not in org) should be filtered out")
 	}
+
 	if !strings.Contains(output, "Contact-Patient Layout") {
 		t.Error("expected Contact-Patient Layout (in org) to be in output")
 	}
 }
-
 
 func TestMatchesExclude(t *testing.T) {
 	tests := []struct {
@@ -707,6 +766,7 @@ func TestMatchesExclude(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := matchesExclude(tt.entry, tt.patterns)
+
 			if got != tt.want {
 				t.Errorf("matchesExclude(%q, %v) = %v, want %v", tt.entry, tt.patterns, got, tt.want)
 			}
@@ -738,12 +798,15 @@ func TestExtractRawEntry(t *testing.T) {
 
 	// Found — userPermissions with name "ChatterInternal".
 	got := extractRawEntry(raw, "userPermissions", "ChatterInternal", "name")
+
 	if got == "" {
 		t.Fatal("expected to find ChatterInternal entry")
 	}
+
 	if !strings.Contains(got, "ChatterInternal") {
 		t.Error("extracted entry should contain the entry name")
 	}
+
 	if !strings.HasPrefix(got, "    ") {
 		t.Error("extracted entry should be 4-space indented")
 	}
@@ -755,27 +818,32 @@ func TestExtractRawEntry(t *testing.T) {
 
 	// Found — classAccesses with name "MyClass".
 	got2 := extractRawEntry(raw, "classAccesses", "MyClass", "apexClass")
+
 	if got2 == "" {
 		t.Fatal("expected to find MyClass entry")
 	}
+
 	if !strings.Contains(got2, "MyClass") {
 		t.Error("extracted entry should contain the class name")
 	}
 
 	// Found — fieldPermissions with name "Account.Revenue__c".
 	got3 := extractRawEntry(raw, "fieldPermissions", "Account.Revenue__c", "field")
+
 	if got3 == "" {
 		t.Fatal("expected to find Account.Revenue__c entry")
 	}
 
 	// Not found — entry not in raw XML.
 	got4 := extractRawEntry(raw, "userPermissions", "NonExistent", "name")
+
 	if got4 != "" {
 		t.Error("expected empty string for non-existent entry")
 	}
 
 	// Empty raw XML.
 	got5 := extractRawEntry("", "userPermissions", "Test", "name")
+
 	if got5 != "" {
 		t.Error("expected empty string for empty raw XML")
 	}
@@ -821,6 +889,7 @@ func TestNormalizeProfileExcludePreservesOriginal(t *testing.T) {
 	if !strings.Contains(output, "<enabled>false</enabled>") {
 		t.Error("expected preserved ChatterInternal with enabled=false from raw XML")
 	}
+
 	// StandardUserPerm (not excluded) should be marshaled with enabled=true from graph.
 	if !strings.Contains(output, "<enabled>true</enabled>") {
 		t.Error("expected marshaled StandardUserPerm with enabled=true")
@@ -858,6 +927,7 @@ func TestNormalizeProfileExcludeDropsBackfilled(t *testing.T) {
 	if !strings.Contains(output, "ChatterInternal") {
 		t.Error("expected ChatterInternal to be in output")
 	}
+
 	// ChatterOwnGroups (backfilled, matches exclude, not in raw XML) should be dropped.
 	if strings.Contains(output, "ChatterOwnGroups") {
 		t.Error("expected ChatterOwnGroups (backfilled + excluded) to be dropped")
@@ -916,6 +986,7 @@ func TestNormalizeProfileExcludeOrdering(t *testing.T) {
 	if aIdx < 0 || bIdx < 0 || xIdx < 0 || yIdx < 0 {
 		t.Fatal("all entries should be present in output")
 	}
+
 	if !(aIdx < bIdx && bIdx < xIdx && xIdx < yIdx) {
 		t.Error("entries should be in alphabetical order: A_Normal < B_Normal < X_Excluded < Y_Excluded")
 	}

@@ -17,6 +17,7 @@ func (e DOTExporter) Export(g *SalesforceGraph, w io.Writer) error {
 	// Profile nodes
 	for _, p := range g.ProfileNodes {
 		id := dotID("Profile:" + p.Name)
+
 		if _, err := fmt.Fprintf(w, "  %s [label=%s];\n", id, dotID(p.Name)); err != nil {
 			return err
 		}
@@ -25,6 +26,7 @@ func (e DOTExporter) Export(g *SalesforceGraph, w io.Writer) error {
 	// Metadata nodes
 	for _, m := range g.MetadataNodes {
 		id := dotID(string(m.MetaType) + ":" + m.Name)
+
 		if _, err := fmt.Fprintf(w, "  %s [label=%s];\n", id, dotID(m.Name)); err != nil {
 			return err
 		}
@@ -35,6 +37,7 @@ func (e DOTExporter) Export(g *SalesforceGraph, w io.Writer) error {
 		src := dotID("Profile:" + e.ProfileNode.Name)
 		tgt := dotID(string(e.MetadataNode.MetaType) + ":" + e.MetadataNode.Name)
 		label := edgePropertiesLabel(e.Properties)
+
 		if label != "" {
 			if _, err := fmt.Fprintf(w, "  %s -> %s [label=%s];\n", src, tgt, dotID(label)); err != nil {
 				return err
@@ -49,6 +52,7 @@ func (e DOTExporter) Export(g *SalesforceGraph, w io.Writer) error {
 	if _, err := fmt.Fprintln(w, "}"); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -57,6 +61,7 @@ func dotID(s string) string {
 	if strings.ContainsAny(s, " :.-") {
 		return `"` + s + `"`
 	}
+
 	return s
 }
 
@@ -64,6 +69,7 @@ func dotID(s string) string {
 // from all non-nil EdgeProperties fields.
 func edgePropertiesLabel(props EdgeProperties) string {
 	var parts []string
+
 	if props.Enabled != nil {
 		parts = append(parts, fmt.Sprintf("enabled: %t", *props.Enabled))
 	}

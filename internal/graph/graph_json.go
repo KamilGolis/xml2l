@@ -16,6 +16,7 @@ type JSONExporter struct{}
 
 func (e JSONExporter) Export(g *SalesforceGraph, w io.Writer) error {
 	nodes := make([]CytoscapeNode, 0, len(g.ProfileNodes)+len(g.MetadataNodes))
+
 	for _, p := range g.ProfileNodes {
 		nodes = append(nodes, CytoscapeNode{
 			Data: CytoscapeNodeData{
@@ -25,6 +26,7 @@ func (e JSONExporter) Export(g *SalesforceGraph, w io.Writer) error {
 			},
 		})
 	}
+
 	for _, m := range g.MetadataNodes {
 		nodes = append(nodes, CytoscapeNode{
 			Data: CytoscapeNodeData{
@@ -36,6 +38,7 @@ func (e JSONExporter) Export(g *SalesforceGraph, w io.Writer) error {
 	}
 
 	edges := make([]CytoscapeEdge, 0, len(g.Edges))
+
 	for i, e := range g.Edges {
 		edges = append(edges, CytoscapeEdge{
 			Data: CytoscapeEdgeData{
@@ -68,5 +71,6 @@ func (e JSONExporter) Export(g *SalesforceGraph, w io.Writer) error {
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
+
 	return enc.Encode(out)
 }

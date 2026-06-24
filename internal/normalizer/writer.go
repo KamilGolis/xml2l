@@ -45,6 +45,8 @@ func WriteProfiles(g NormalizeGraph) error {
 
 			if err := os.WriteFile(profile.SourcePath, xmlBytes, 0644); err != nil {
 				errs <- fmt.Errorf("Write %s: %w", profile.SourcePath, err)
+			} else {
+				fmt.Fprintf(os.Stderr, "Normalized: %s\n", profile.Name)
 			}
 		}(p)
 	}

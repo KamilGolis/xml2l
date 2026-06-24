@@ -11,18 +11,20 @@ func TestScanFindsClsAndFieldMeta(t *testing.T) {
 
 	// Create 3 .cls files
 	for _, name := range []string{"MyController.cls", "MyService.cls", "MyTest.cls"} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("// test"), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("// test"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	// Create 2 .field-meta.xml files inside objects/Account/fields/
 	fieldDir := filepath.Join(dir, "objects", "Account", "fields")
-	if err := os.MkdirAll(fieldDir, 0755); err != nil {
+
+	if err := os.MkdirAll(fieldDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	for _, name := range []string{"Revenue__c.field-meta.xml", "Status__c.field-meta.xml"} {
-		if err := os.WriteFile(filepath.Join(fieldDir, name), []byte("<?xml version=\"1.0\"?>"), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(fieldDir, name), []byte("<?xml version=\"1.0\"?>"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -49,15 +51,16 @@ func TestScanExtensionDedup(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create both .cls and .cls-meta.xml for the same class
-	if err := os.WriteFile(filepath.Join(dir, "MyController.cls"), []byte("// test"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "MyController.cls"), []byte("// test"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "MyController.cls-meta.xml"), []byte("<?xml?>"), 0644); err != nil {
+
+	if err := os.WriteFile(filepath.Join(dir, "MyController.cls-meta.xml"), []byte("<?xml?>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create a standalone .cls-meta.xml without matching .cls
-	if err := os.WriteFile(filepath.Join(dir, "Orphan.cls-meta.xml"), []byte("<?xml?>"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "Orphan.cls-meta.xml"), []byte("<?xml?>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -74,6 +77,7 @@ func TestScanExtensionDedup(t *testing.T) {
 	if !gt["MyController"] {
 		t.Error("expected MyController in ground truth")
 	}
+
 	if !gt["Orphan"] {
 		t.Error("expected Orphan in ground truth")
 	}
@@ -96,17 +100,20 @@ func TestScanRootIsolation(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create a .cls inside the scanned root.
-	if err := os.WriteFile(filepath.Join(dir, "Valid.cls"), []byte("// test"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "Valid.cls"), []byte("// test"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create a sibling directory outside the scanned root.
 	outsideDir := filepath.Join(dir, "..", "outside")
-	if err := os.MkdirAll(outsideDir, 0755); err != nil {
+
+	if err := os.MkdirAll(outsideDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	defer os.RemoveAll(outsideDir)
-	if err := os.WriteFile(filepath.Join(outsideDir, "Outside.cls"), []byte("// test"), 0644); err != nil {
+
+	if err := os.WriteFile(filepath.Join(outsideDir, "Outside.cls"), []byte("// test"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -118,6 +125,7 @@ func TestScanRootIsolation(t *testing.T) {
 	if !gt["Valid"] {
 		t.Error("expected Valid in ground truth")
 	}
+
 	if gt["Outside"] {
 		t.Error("Outside should NOT be in ground truth (outside scan root)")
 	}
@@ -149,6 +157,7 @@ func TestExtractFieldIdentifier(t *testing.T) {
 
 	for _, tc := range tests {
 		got := extractFieldIdentifier(tc.path, tc.fileName)
+
 		if got != tc.want {
 			t.Errorf("extractFieldIdentifier(%q, %q) = %q, want %q", tc.path, tc.fileName, got, tc.want)
 		}
@@ -158,15 +167,17 @@ func TestExtractFieldIdentifier(t *testing.T) {
 func TestScanLayouts(t *testing.T) {
 	dir := t.TempDir()
 	layoutDir := filepath.Join(dir, "layouts")
-	if err := os.MkdirAll(layoutDir, 0755); err != nil {
+
+	if err := os.MkdirAll(layoutDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	for _, name := range []string{
 		"Account-Account Layout.layout-meta.xml",
 		"Contact-Patient Layout.layout-meta.xml",
 		"Account-HCO Layout.layout-meta.xml",
 	} {
-		if err := os.WriteFile(filepath.Join(layoutDir, name), []byte("<xml/>"), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(layoutDir, name), []byte("<xml/>"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -175,16 +186,20 @@ func TestScanLayouts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScanLayouts failed: %v", err)
 	}
+
 	if len(layouts) != 3 {
 		t.Fatalf("expected 3 layouts, got %d: %v", len(layouts), layouts)
 	}
+
 	// Should be sorted alphabetically.
 	if layouts[0] != "Account-Account Layout" {
 		t.Errorf("expected first layout Account-Account Layout, got %q", layouts[0])
 	}
+
 	if layouts[1] != "Account-HCO Layout" {
 		t.Errorf("expected second layout Account-HCO Layout, got %q", layouts[1])
 	}
+
 	if layouts[2] != "Contact-Patient Layout" {
 		t.Errorf("expected third layout Contact-Patient Layout, got %q", layouts[2])
 	}
@@ -196,6 +211,7 @@ func TestScanLayoutsMissingDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScanLayouts should not error on missing directory: %v", err)
 	}
+
 	if layouts != nil && len(layouts) != 0 {
 		t.Errorf("expected empty slice for missing layouts dir, got %v", layouts)
 	}

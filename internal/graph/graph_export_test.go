@@ -20,6 +20,7 @@ func TestJSONExporter(t *testing.T) {
 		Nodes []CytoscapeNode `json:"nodes"`
 		Edges []CytoscapeEdge `json:"edges"`
 	}
+
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("JSON output not valid JSON: %v\n%s", err, buf.String())
 	}
@@ -27,21 +28,26 @@ func TestJSONExporter(t *testing.T) {
 	if len(result.Nodes) != 3 {
 		t.Errorf("expected 3 nodes, got %d", len(result.Nodes))
 	}
+
 	if len(result.Edges) != 2 {
 		t.Errorf("expected 2 edges, got %d", len(result.Edges))
 	}
 
 	// Verify all nodes present
 	nodeIDs := make(map[string]bool)
+
 	for _, n := range result.Nodes {
 		nodeIDs[n.Data.ID] = true
 	}
+
 	if !nodeIDs["Profile:Admin"] {
 		t.Error("missing Profile:Admin node")
 	}
+
 	if !nodeIDs["ApexClass:MyClass"] {
 		t.Error("missing ApexClass:MyClass node")
 	}
+
 	if !nodeIDs["CustomField:Account.Name"] {
 		t.Error("missing CustomField:Account.Name node")
 	}
@@ -84,6 +90,7 @@ func TestDOTExporter(t *testing.T) {
 
 	// Must end with }
 	output = strings.TrimSpace(output)
+
 	if !strings.HasSuffix(output, "}") {
 		t.Error("DOT output should end with }")
 	}
@@ -92,6 +99,7 @@ func TestDOTExporter(t *testing.T) {
 	if !strings.Contains(output, `"Profile:Admin"`) {
 		t.Error("DOT output missing Profile:Admin node")
 	}
+
 	if !strings.Contains(output, `"ApexClass:MyClass"`) {
 		t.Error("DOT output missing ApexClass:MyClass node")
 	}
@@ -100,6 +108,7 @@ func TestDOTExporter(t *testing.T) {
 	if !strings.Contains(output, "->") {
 		t.Error("DOT output missing edges")
 	}
+
 	if !strings.Contains(output, "enabled: true") {
 		t.Error("DOT output missing edge property label")
 	}
@@ -123,6 +132,7 @@ func TestJSONExporterEmptyGraph(t *testing.T) {
 		Nodes []CytoscapeNode `json:"nodes"`
 		Edges []CytoscapeEdge `json:"edges"`
 	}
+
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("output not valid JSON: %v", err)
 	}
@@ -130,6 +140,7 @@ func TestJSONExporterEmptyGraph(t *testing.T) {
 	if len(result.Nodes) != 0 {
 		t.Errorf("expected 0 nodes for empty graph, got %d", len(result.Nodes))
 	}
+
 	if len(result.Edges) != 0 {
 		t.Errorf("expected 0 edges for empty graph, got %d", len(result.Edges))
 	}
@@ -145,6 +156,7 @@ func TestDOTExporterEmptyGraph(t *testing.T) {
 	}
 
 	output := strings.TrimSpace(buf.String())
+
 	if output != "digraph ProfileGraph {}" && output != "digraph ProfileGraph {\n}" {
 		t.Errorf("unexpected DOT output for empty graph: %s", output)
 	}
