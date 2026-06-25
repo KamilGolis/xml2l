@@ -21,19 +21,24 @@ func LoadProfiles(projectPath string) (*graph.SalesforceGraph, error) {
 
 	// Find all profile files.
 	var profileFiles []string
+
 	err = filepath.WalkDir(projectPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
+
 		if d.IsDir() {
 			return nil
 		}
+
 		if filepath.Ext(d.Name()) != ".xml" {
 			return nil
 		}
+
 		if matched, _ := filepath.Match("*.profile-meta.xml", d.Name()); matched {
 			profileFiles = append(profileFiles, path)
 		}
+
 		return nil
 	})
 	if err != nil {
@@ -68,6 +73,7 @@ func LoadProfiles(projectPath string) (*graph.SalesforceGraph, error) {
 		// Map section entries to graph edges.
 		for sectionTag, entries := range r.Profile.Sections {
 			metaType := graph.TagToMetaType(sectionTag)
+
 			for _, entry := range entries {
 				mn := g.GetOrCreateMetadataNode(metaType, entry.Name)
 				g.AddEdge(p, mn, entry.ToEdgeProperties())

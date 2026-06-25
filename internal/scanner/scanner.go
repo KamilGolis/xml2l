@@ -30,6 +30,7 @@ func Scan(root string) (GroundTruth, error) {
 			fmt.Fprintf(os.Stderr, "warning: skip %s: %v\n", path, err)
 			return nil
 		}
+
 		if d.IsDir() {
 			return nil
 		}
@@ -47,6 +48,7 @@ func Scan(root string) (GroundTruth, error) {
 
 		case strings.HasSuffix(name, ".field-meta.xml"):
 			ident := extractFieldIdentifier(path, name)
+
 			if ident != "" {
 				gt[ident] = true
 			}
@@ -54,7 +56,6 @@ func Scan(root string) (GroundTruth, error) {
 
 		return nil
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("scan %s: %w", root, err)
 	}
@@ -67,6 +68,7 @@ func Scan(root string) (GroundTruth, error) {
 // result is prefixed with the object name. Otherwise just the field name.
 func extractFieldIdentifier(path, fileName string) string {
 	ident := strings.TrimSuffix(fileName, ".field-meta.xml")
+
 	if ident == "" {
 		return ""
 	}
@@ -80,6 +82,7 @@ func extractFieldIdentifier(path, fileName string) string {
 	// parent is "objects" to avoid false prefixes on flat paths.
 	if filepath.Base(dir) == "fields" && filepath.Base(parentDir) != "" {
 		gpDir := filepath.Dir(parentDir)
+
 		if filepath.Base(gpDir) == "objects" {
 			objName := filepath.Base(parentDir)
 			return objName + "." + ident
@@ -98,16 +101,21 @@ func ScanLayouts(root string) ([]string, error) {
 	if err != nil {
 		return nil, nil // directory doesn't exist — no layouts available
 	}
+
 	var layouts []string
+
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
+
 		name := entry.Name()
+
 		if strings.HasSuffix(name, ".layout-meta.xml") {
 			layouts = append(layouts, strings.TrimSuffix(name, ".layout-meta.xml"))
 		}
 	}
+
 	sort.Strings(layouts)
 	return layouts, nil
 }

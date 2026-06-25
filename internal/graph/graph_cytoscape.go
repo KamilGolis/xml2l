@@ -6,8 +6,6 @@ import (
 	"strconv"
 )
 
-// --- Cytoscape.js JSON serialization ---
-
 // CytoscapeGraph is the top-level structure for serializing the graph to
 // the Cytoscape.js elements format.
 type CytoscapeGraph struct {
@@ -77,6 +75,7 @@ func (g *SalesforceGraph) ToCytoscapeJSON(maxPerType int) *CytoscapeGraph {
 	// Group metadata nodes by MetaType and count edges per node
 	typeMetaNodes := make(map[MetadataType][]*MetadataNode)
 	edgeCounts := make(map[*MetadataNode]int)
+
 	for _, e := range g.Edges {
 		edgeCounts[e.MetadataNode]++
 	}
@@ -98,6 +97,7 @@ func (g *SalesforceGraph) ToCytoscapeJSON(maxPerType int) *CytoscapeGraph {
 
 		for i := 0; i < limit; i++ {
 			m := nodes[i]
+
 			cg.Nodes = append(cg.Nodes, CytoscapeNode{
 				Data: CytoscapeNodeData{
 					ID:       string(metaType) + ":" + m.Name,
@@ -109,8 +109,10 @@ func (g *SalesforceGraph) ToCytoscapeJSON(maxPerType int) *CytoscapeGraph {
 
 		// Aggregate excess nodes into a summary entry
 		excess := len(nodes) - limit
+
 		if excess > 0 {
 			summaryName := string(metaType) + " +" + strconv.Itoa(excess) + " more"
+
 			cg.Nodes = append(cg.Nodes, CytoscapeNode{
 				Data: CytoscapeNodeData{
 					ID:       summaryName,
@@ -123,18 +125,22 @@ func (g *SalesforceGraph) ToCytoscapeJSON(maxPerType int) *CytoscapeGraph {
 
 	// Build a set of included node IDs for edge filtering
 	included := make(map[string]bool)
+
 	for _, n := range cg.Nodes {
 		included[n.Data.ID] = true
 	}
 
 	// Edges — only include edges whose source and target are both in the node set
 	edgeIndex := 0
+
 	for _, e := range g.Edges {
 		srcID := "Profile:" + e.ProfileNode.Name
 		tgtID := string(e.MetadataNode.MetaType) + ":" + e.MetadataNode.Name
+
 		if !included[srcID] || !included[tgtID] {
 			continue
 		}
+
 		edge := CytoscapeEdge{
 			Data: CytoscapeEdgeData{
 				ID:          fmt.Sprintf("e%d", edgeIndex),
@@ -157,6 +163,7 @@ func (g *SalesforceGraph) ToCytoscapeJSON(maxPerType int) *CytoscapeGraph {
 				RecordType:  e.Properties.RecordType,
 			},
 		}
+
 		cg.Edges = append(cg.Edges, edge)
 		edgeIndex++
 	}

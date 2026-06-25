@@ -75,6 +75,8 @@ type sectionDecoder func(*xml.Decoder, *xml.StartElement, scanner.GroundTruth, *
 
 var sectionFuncs = map[string]sectionDecoder{}
 
+const profileNS = "http://soap.sforce.com/2006/04/metadata"
+
 func init() {
 	sectionFuncs["classAccesses"] = decodeClassAccesses
 	sectionFuncs["agentAccesses"] = decodeAgentAccesses
@@ -100,8 +102,6 @@ func init() {
 	sectionFuncs["userPermissions"] = decodeUserPermissions
 }
 
-const profileNS = "http://soap.sforce.com/2006/04/metadata"
-
 // Decode parses a single .profile-meta.xml file from reader r, using gt to
 // filter out ghost references. Returns a populated Profile or an error.
 func Decode(r io.Reader, gt scanner.GroundTruth) (*Profile, error) {
@@ -113,8 +113,10 @@ func Decode(r io.Reader, gt scanner.GroundTruth) (*Profile, error) {
 
 	// Skip leading non-element tokens (ProcInst, Comment, Directive, CharData).
 	var rootTok xml.Token
+
 	for {
 		var err error
+
 		rootTok, err = decoder.Token()
 		if err == io.EOF {
 			return nil, fmt.Errorf("empty or non-XML input")
@@ -122,6 +124,7 @@ func Decode(r io.Reader, gt scanner.GroundTruth) (*Profile, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read root: %w", err)
 		}
+
 		switch rootTok.(type) {
 		case xml.ProcInst, xml.Comment, xml.Directive, xml.CharData:
 			continue
@@ -150,6 +153,7 @@ func Decode(r io.Reader, gt scanner.GroundTruth) (*Profile, error) {
 		switch t := tok.(type) {
 		case xml.StartElement:
 			tag := t.Name.Local
+
 			if t.Name.Space != "" && t.Name.Space != profileNS {
 				if err := skipElement(decoder); err != nil {
 					return nil, err
@@ -164,9 +168,11 @@ func Decode(r io.Reader, gt scanner.GroundTruth) (*Profile, error) {
 				}
 			case "custom":
 				var val string
+
 				if err := decoder.DecodeElement(&val, &t); err != nil {
 					return nil, fmt.Errorf("custom: %w", err)
 				}
+
 				prof.IsCustom = strings.TrimSpace(val) == "true"
 				prof.HasCustomTag = true
 			case "description":
@@ -176,9 +182,11 @@ func Decode(r io.Reader, gt scanner.GroundTruth) (*Profile, error) {
 			default:
 				if fn, ok := sectionFuncs[tag]; ok {
 					var entries []MetadataEntry
+
 					if err := fn(decoder, &t, gt, &entries); err != nil {
 						return nil, fmt.Errorf("%s: %w", tag, err)
 					}
+
 					if len(entries) > 0 {
 						prof.Sections[tag] = append(prof.Sections[tag], entries...)
 					}
@@ -204,16 +212,19 @@ func Decode(r io.Reader, gt scanner.GroundTruth) (*Profile, error) {
 // skipElement skips over a complete XML element (including all children).
 func skipElement(decoder *xml.Decoder) error {
 	depth := 1
+
 	for {
 		tok, err := decoder.Token()
 		if err != nil {
 			return err
 		}
+
 		switch tok.(type) {
 		case xml.StartElement:
 			depth++
 		case xml.EndElement:
 			depth--
+
 			if depth == 0 {
 				return nil
 			}

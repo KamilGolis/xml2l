@@ -37,17 +37,21 @@ func RunConcurrent(paths []string, gt scanner.GroundTruth) ([]AggregateResult, *
 
 	// Fan-out: decode each profile concurrently with bounded parallelism.
 	maxWorkers := runtime.NumCPU()
+
 	if maxWorkers > len(paths) {
 		maxWorkers = len(paths)
 	}
+
 	if maxWorkers < 1 {
 		maxWorkers = 1
 	}
+
 	sem := make(chan struct{}, maxWorkers)
 
 	for i, path := range paths {
 		wg.Add(1)
 		sem <- struct{}{}
+
 		go func(idx int, filePath string) {
 			defer wg.Done()
 			defer func() { <-sem }()
@@ -74,24 +78,29 @@ func RunConcurrent(paths []string, gt scanner.GroundTruth) ([]AggregateResult, *
 	// Collect results in a buffer indexed by original position.
 	buf := make([]*jobResult, len(paths))
 	var errs []error
+
 	for r := range results {
 		if r.err != nil {
 			errs = append(errs, r.err)
 			continue
 		}
+
 		buf[r.idx] = &r
 	}
 
 	// Fan-in: build Master Schema sequentially from all successful decodes.
 	ms := NewMasterSchema()
 	ordered := make([]AggregateResult, 0, len(paths))
+
 	for i, r := range buf {
 		if r == nil {
 			continue
 		}
+
 		if r.prof != nil {
 			ms.merge(r.prof)
 		}
+
 		ordered = append(ordered, AggregateResult{
 			Raw:     r.raw,
 			Profile: r.prof,

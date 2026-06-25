@@ -45,82 +45,104 @@ type tabVisibilityEntry struct {
 	Visibility string `xml:"visibility"`
 }
 
-// -- Complex section decoders
-
 func decodeAppVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry) error {
 	var entry appVisibilityEntry
+
 	if err := decoder.DecodeElement(&entry, se); err != nil {
 		return err
 	}
+
 	if entry.Application == "" {
 		return nil
 	}
+
 	*entries = append(*entries, MetadataEntry{Name: entry.Application, Visible: entry.Visible, Default: entry.Default})
+
 	return nil
 }
 
 func decodeCategoryGroupVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry) error {
 	var entry categoryGroupEntry
+
 	if err := decoder.DecodeElement(&entry, se); err != nil {
 		return err
 	}
+
 	if entry.DataCategoryGroup == "" {
 		return nil
 	}
+
 	*entries = append(*entries, MetadataEntry{Name: entry.DataCategoryGroup, Visibility: &entry.Visibility})
+
 	return nil
 }
 
 func decodeTabVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry) error {
 	var entry tabVisibilityEntry
+
 	if err := decoder.DecodeElement(&entry, se); err != nil {
 		return err
 	}
+
 	if entry.Tab == "" || entry.Visibility == "" {
 		return nil
 	}
+
 	// Tab visibility uses string enum values: DefaultOn, DefaultOff, Hidden.
 	// Pass through the raw string value.
 	*entries = append(*entries, MetadataEntry{Name: entry.Tab, Visibility: &entry.Visibility})
+
 	return nil
 }
 
 func decodeLayoutAssignments(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry) error {
 	var entry layoutEntry
+
 	if err := decoder.DecodeElement(&entry, se); err != nil {
 		return err
 	}
+
 	if entry.Layout == "" {
 		return nil
 	}
+
 	*entries = append(*entries, MetadataEntry{Name: entry.Layout, RecordType: &entry.RecordType})
+
 	return nil
 }
 
 func decodeObjectPermissions(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry) error {
 	var entry objectPermEntry
+
 	if err := decoder.DecodeElement(&entry, se); err != nil {
 		return err
 	}
+
 	if entry.Object == "" {
 		return nil
 	}
+
 	*entries = append(*entries, MetadataEntry{
 		Name: entry.Object, AllowCreate: entry.AllowCreate, AllowDelete: entry.AllowDelete,
 		AllowRead: entry.AllowRead, AllowEdit: entry.AllowEdit,
 		ModifyAll: entry.AllowModifyAll, ViewAll: entry.ViewAll,
 	})
+
 	return nil
 }
 
 func decodeRecordTypeVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry) error {
 	var entry recordTypeEntry
+
 	if err := decoder.DecodeElement(&entry, se); err != nil {
 		return err
 	}
+
 	if entry.RecordType == "" {
 		return nil
 	}
+
 	*entries = append(*entries, MetadataEntry{Name: entry.RecordType, Visible: entry.Visible, Default: entry.Default})
+
 	return nil
 }

@@ -39,12 +39,14 @@ func WriteProfiles(g NormalizeGraph) error {
 
 			xmlBytes := NormalizeProfile(profile, g)
 			if xmlBytes == nil {
-				errs <- fmt.Errorf("no XML generated for %s", profile.Name)
+				errs <- fmt.Errorf("No XML generated for %s", profile.Name)
 				return
 			}
 
 			if err := os.WriteFile(profile.SourcePath, xmlBytes, 0644); err != nil {
-				errs <- fmt.Errorf("write %s: %w", profile.SourcePath, err)
+				errs <- fmt.Errorf("Write %s: %w", profile.SourcePath, err)
+			} else {
+				fmt.Fprintf(os.Stderr, "Normalized: %s\n", profile.Name)
 			}
 		}(p)
 	}
@@ -58,7 +60,7 @@ func WriteProfiles(g NormalizeGraph) error {
 		if firstErr == nil {
 			firstErr = err
 		}
-		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 	}
 
 	return firstErr

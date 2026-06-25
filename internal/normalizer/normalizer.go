@@ -164,8 +164,6 @@ type enhancedSummaryXML struct {
 	Enabled            bool     `xml:"enabled"`
 }
 
-// -- Helpers
-
 // NormalizeGraph is the interface the normalizer requires to access profile
 // data from the graph without depending on the concrete SalesforceGraph type.
 type NormalizeGraph interface {
@@ -176,8 +174,6 @@ type NormalizeGraph interface {
 	OrgSchema() graph.OrgSchemaProvider
 	ExcludePatterns() []string
 }
-
-// -- DefaultEdgeProperties
 
 // DefaultEdgeProperties returns an EdgeProperties with all boolean fields set to false
 // for the given metadata type. This is used when backfilling missing Master Schema entries.
@@ -218,6 +214,7 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 		if p.RawXML != "" {
 			return []byte(p.RawXML)
 		}
+
 		return nil
 	}
 
@@ -234,7 +231,9 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 		name  string
 		props graph.EdgeProperties
 	}
+
 	edgesByType := make(map[graph.MetadataType][]nameAndProps)
+
 	for _, e := range g.ProfileEdges(p) {
 		edgesByType[e.MetadataNode.MetaType] = append(edgesByType[e.MetadataNode.MetaType], nameAndProps{
 			name:  e.MetadataNode.Name,
@@ -249,9 +248,11 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 
 		sectionEntries := edgesByType[metaType]
 		existing := make(map[string]bool, len(sectionEntries))
+
 		for _, e := range sectionEntries {
 			existing[e.name] = true
 		}
+
 		entries := make([]nameAndProps, 0, len(sectionEntries))
 		entries = append(entries, sectionEntries...)
 
@@ -261,6 +262,7 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 		// profiles creates invalid configurations.
 		if sectionTag != "layoutAssignments" {
 			msNamesList := g.MasterSchema().AllNames(sectionTag)
+
 			for _, name := range msNamesList {
 				if !existing[name] {
 					entries = append(entries, nameAndProps{
@@ -274,14 +276,19 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 		// For layoutAssignments: add a default layout for objects with no entries.
 		if sectionTag == "layoutAssignments" {
 			available := g.AvailableLayouts()
+
 			if len(available) > 0 {
 				objectsHaveLayout := make(map[string]bool)
+
 				for _, e := range entries {
 					objectsHaveLayout[objectFromLayoutName(e.name)] = true
 				}
+
 				seenAdded := make(map[string]bool)
+
 				for _, layout := range available {
 					obj := objectFromLayoutName(layout)
+
 					if !objectsHaveLayout[obj] && !seenAdded[obj] {
 						seenAdded[obj] = true
 						entries = append(entries, nameAndProps{
@@ -297,11 +304,13 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 		// entries that don't exist in the org (overrides all other checks).
 		if os := g.OrgSchema(); os != nil && os.HasType(string(metaType)) {
 			filtered := make([]nameAndProps, 0, len(entries))
+
 			for _, e := range entries {
 				if os.Has(string(metaType), e.name) {
 					filtered = append(filtered, e)
 				}
 			}
+
 			entries = filtered
 		}
 
@@ -314,6 +323,7 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 			if entries[i].name != entries[j].name {
 				return entries[i].name < entries[j].name
 			}
+
 			return strVal(entries[i].props.RecordType) < strVal(entries[j].props.RecordType)
 		})
 
@@ -324,9 +334,11 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 			seenNoRT := make(map[string]bool)
 			seenRT := make(map[string]bool)
 			filtered := make([]nameAndProps, 0, len(entries))
+
 			for _, e := range entries {
 				obj := objectFromLayoutName(e.name)
 				rt := strVal(e.props.RecordType)
+
 				if rt == "" {
 					if !seenNoRT[obj] {
 						seenNoRT[obj] = true
@@ -339,17 +351,20 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 					}
 				}
 			}
+
 			entries = filtered
 		}
 
 		// Marshal entries in sorted order; excluded entries preserve original XML.
 		patterns := g.ExcludePatterns()
 		nameField, hasNameField := sectionNameField[sectionTag]
+
 		for _, e := range entries {
 			if len(patterns) > 0 && matchesExclude(e.name, patterns) {
 				// Excluded entry: preserve original XML if it exists, otherwise drop.
 				if hasNameField {
 					raw := extractRawEntry(p.RawXML, sectionTag, e.name, nameField)
+
 					if raw != "" {
 						buf.WriteString(raw)
 					}
@@ -357,11 +372,13 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 				// If no nameField mapping or entry not in raw XML, silently drop.
 				continue
 			}
+
 			xmlBytes, err := marshalEntry(sectionTag, e.name, e.props)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "warning: marshal %s/%s: %v\n", sectionTag, e.name, err)
 				continue
 			}
+
 			buf.Write(xmlBytes)
 		}
 	}
@@ -379,6 +396,7 @@ func writeProfileFields(buf *bytes.Buffer, p *graph.ProfileNode) {
 	if p.UserLicense != "" {
 		buf.WriteString("    <userLicense>" + xmlEscape(p.UserLicense) + "</userLicense>\n")
 	}
+
 	if p.HasCustomTag {
 		val := "false"
 		if p.IsCustom {
@@ -386,6 +404,7 @@ func writeProfileFields(buf *bytes.Buffer, p *graph.ProfileNode) {
 		}
 		buf.WriteString("    <custom>" + val + "</custom>\n")
 	}
+
 	if p.Description != "" {
 		buf.WriteString("    <description>" + xmlEscape(p.Description) + "</description>\n")
 	}
@@ -411,6 +430,7 @@ func marshalEntry(sectionTag, name string, props graph.EdgeProperties) ([]byte, 
 		v = appVisibilityXML{Application: name, Default: boolVal(props.Default), Visible: boolVal(props.Visible)}
 	case "categoryGroupVisibilities":
 		vis := ""
+
 		if props.Visibility != nil {
 			vis = *props.Visibility
 		}
@@ -431,6 +451,7 @@ func marshalEntry(sectionTag, name string, props graph.EdgeProperties) ([]byte, 
 		v = extDataSourceXML{ExternalDataSource: name, Enabled: boolVal(props.Enabled)}
 	case "layoutAssignments":
 		rt := ""
+
 		if props.RecordType != nil {
 			rt = *props.RecordType
 		}
@@ -495,11 +516,13 @@ func objectFromLayoutName(layoutName string) string {
 // pre-lowercased by the caller.
 func matchesExclude(name string, patterns []string) bool {
 	lowerName := strings.ToLower(name)
+
 	for _, p := range patterns {
 		if strings.HasPrefix(lowerName, p) {
 			return true
 		}
 	}
+
 	return false
 }
 

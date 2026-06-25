@@ -18,15 +18,19 @@ func CrossReference(g *graph.SalesforceGraph, repoFiles map[string]map[string]bo
 
 	// Direction 1: graph → filesystem — find metadata nodes with no matching file.
 	seenInGraph := make(map[string]map[string]bool) // metaType -> name -> true (for direction 2)
+
 	for _, mn := range g.MetadataNodes {
 		metaType := string(mn.MetaType)
+
 		if metaTypeSkipList[metaType] {
 			continue
 		}
+
 		// Initialize seen map.
 		if seenInGraph[metaType] == nil {
 			seenInGraph[metaType] = make(map[string]bool)
 		}
+
 		seenInGraph[metaType][mn.Name] = true
 
 		// Check if this node exists in the filesystem.
@@ -46,6 +50,7 @@ func CrossReference(g *graph.SalesforceGraph, repoFiles map[string]map[string]bo
 		if metaTypeSkipList[metaType] {
 			continue
 		}
+
 		for name := range entries {
 			if seenInGraph[metaType] == nil || !seenInGraph[metaType][name] {
 				xr.Unreferenced = append(xr.Unreferenced, RepoEntry{
@@ -61,21 +66,27 @@ func CrossReference(g *graph.SalesforceGraph, repoFiles map[string]map[string]bo
 		if xr.MissingFiles[i].MetaType != xr.MissingFiles[j].MetaType {
 			return xr.MissingFiles[i].MetaType < xr.MissingFiles[j].MetaType
 		}
+
 		return xr.MissingFiles[i].Name < xr.MissingFiles[j].Name
 	})
+
 	sort.Slice(xr.Unreferenced, func(i, j int) bool {
 		if xr.Unreferenced[i].MetaType != xr.Unreferenced[j].MetaType {
 			return xr.Unreferenced[i].MetaType < xr.Unreferenced[j].MetaType
 		}
+
 		return xr.Unreferenced[i].Name < xr.Unreferenced[j].Name
 	})
 
 	// Build skipped-types note.
 	var skipped []string
+
 	for mt := range metaTypeSkipList {
 		skipped = append(skipped, mt)
 	}
+
 	sort.Strings(skipped)
+
 	if len(skipped) > 0 {
 		xr.SkippedTypesNote = "Skipped " + strings.Join(skipped, ", ")
 	}
