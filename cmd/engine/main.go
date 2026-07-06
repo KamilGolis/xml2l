@@ -24,6 +24,7 @@ func main() {
 
 	rootCmd.AddCommand(
 		newProfileCmd(),
+		newPermSetCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -240,5 +241,46 @@ extension. The source XML files are not modified.`,
 	cmd.Flags().StringVarP(&profileFlag, "profile", "r", "", "Convert a single profile by name (mutually exclusive with --profiles)")
 	cmd.Flags().StringVarP(&profilesFlag, "profiles", "l", "", "Comma-separated list of profile names to convert (mutually exclusive with --profile)")
 	cmd.MarkFlagsMutuallyExclusive("profile", "profiles")
+	return cmd
+}
+
+func newPermSetCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "permset",
+		Short: "Manage Salesforce permission set metadata",
+	}
+	cmd.AddCommand(
+		newPermSetConvertCmd(),
+	)
+	return cmd
+}
+
+func newPermSetConvertCmd() *cobra.Command {
+	permsetFlag := ""
+	permsetsFlag := ""
+
+	cmd := &cobra.Command{
+		Use:   "convert",
+		Short: "Convert permission set XML to YAML (1:1, no normalization)",
+		Long: `Converts .permissionset-meta.xml files to YAML preserving the original
+XML structure exactly — no normalization, no schema cross-check, no sorting.
+
+Output files are written as siblings to the source with a .permissionset-meta.yaml
+extension. The source XML files are not modified.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectPath, _ := cmd.Flags().GetString("path")
+
+			if projectPath == "" {
+				return fmt.Errorf("required flag --path / -p is missing")
+			}
+
+			return converter.ConvertPermSets(projectPath, permsetFlag, permsetsFlag)
+		},
+	}
+
+	addPathFlag(cmd)
+	cmd.Flags().StringVarP(&permsetFlag, "permset", "r", "", "Convert a single permission set by name (mutually exclusive with --permsets)")
+	cmd.Flags().StringVarP(&permsetsFlag, "permsets", "l", "", "Comma-separated list of permission set names to convert (mutually exclusive with --permset)")
+	cmd.MarkFlagsMutuallyExclusive("permset", "permsets")
 	return cmd
 }
