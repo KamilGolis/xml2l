@@ -37,7 +37,7 @@ func ConvertProfiles(projectPath, profileName, profilesCSV string) error {
 	}
 
 	for _, profilePath := range profiles {
-		outPath, yamlBytes, err := ConvertFile(profilePath)
+		outPath, yamlBytes, err := ConvertProfileFile(profilePath)
 		if err != nil {
 			return fmt.Errorf("convert %s: %w", profilePath, err)
 		}
@@ -52,10 +52,9 @@ func ConvertProfiles(projectPath, profileName, profilesCSV string) error {
 	return nil
 }
 
-// ConvertFile reads XML from inputPath and returns the derived output path
-// and YAML content. The output path replaces the ".profile-meta.xml" suffix
-// with ".profile-meta.yaml".
-func ConvertFile(inputPath string) (outputPath string, yamlBytes []byte, err error) {
+// convertXmlToYaml reads XML from inputPath and returns the derived output path
+// and YAML content. The output path replaces the inSuffix suffix with outSuffix.
+func convertXmlToYaml(inputPath, inSuffix, outSuffix string) (outputPath string, yamlBytes []byte, err error) {
 	f, err := os.Open(inputPath)
 	if err != nil {
 		return "", nil, fmt.Errorf("open %s: %w", inputPath, err)
@@ -71,8 +70,22 @@ func ConvertFile(inputPath string) (outputPath string, yamlBytes []byte, err err
 	var buf bytes.Buffer
 	root.emit(&buf, 0)
 
-	outputPath = deriveOutputPath(inputPath)
+	outputPath = strings.TrimSuffix(inputPath, inSuffix) + outSuffix
 	return outputPath, buf.Bytes(), nil
+}
+
+// ConvertProfileFile reads XML from inputPath and returns the derived output path
+// and YAML content. The output path replaces the ".profile-meta.xml" suffix
+// with ".profile-meta.yaml".
+func ConvertProfileFile(inputPath string) (outputPath string, yamlBytes []byte, err error) {
+	return convertXmlToYaml(inputPath, ".profile-meta.xml", ".profile-meta.yaml")
+}
+
+// ConvertPermSetFile reads XML from inputPath and returns the derived output path
+// and YAML content. The output path replaces the ".permissionset-meta.xml" suffix
+// with ".permissionset-meta.yaml".
+func ConvertPermSetFile(inputPath string) (outputPath string, yamlBytes []byte, err error) {
+	return convertXmlToYaml(inputPath, ".permissionset-meta.xml", ".permissionset-meta.yaml")
 }
 
 // findAndFilter discovers all *.profile-meta.xml files under projectPath and
@@ -298,28 +311,44 @@ func groupByName(nodes []bufNode) []nameGroup {
 }
 
 // emitSeqItem writes one YAML sequence item for a complex element.
-// The first child goes inline after "- "; subsequent children are indented
-// two more spaces.
+// The "name" child (first non-boolean text child, i.e. the identifying key
+// like <object>, <field>, <apexClass>) gets the "- " prefix; remaining children
+// are indented. Falls back to the first child if all children have boolean values.
 func emitSeqItem(buf *bytes.Buffer, children []bufNode, itemIndent int) {
 	if len(children) == 0 {
 		return
 	}
 
-	first := children[0]
-	rest := children[1:]
+	// Find the identifying element — first child whose text is not "true"/"false".
+	// In Salesforce metadata sections, this is the name/identifier (e.g. <object>, <field>).
+	nameIdx := -1
+	for i, child := range children {
+		if !isBooleanText(child.Text) {
+			nameIdx = i
+			break
+		}
+	}
+	if nameIdx < 0 {
+		nameIdx = 0 // fallback: first child
+	}
 
 	itemPfx := strings.Repeat(" ", itemIndent)
 
-	if len(first.Children) == 0 {
-		fmt.Fprintf(buf, "%s- %s: %s\n", itemPfx, first.Name, yq(first.Text))
+	// Emit the name child with "- " prefix
+	child := children[nameIdx]
+	if len(child.Children) == 0 {
+		fmt.Fprintf(buf, "%s- %s: %s\n", itemPfx, child.Name, yq(child.Text))
 	} else {
-		fmt.Fprintf(buf, "%s- %s:\n", itemPfx, first.Name)
-		emitGrouped(buf, first.Children, itemIndent+2)
+		fmt.Fprintf(buf, "%s- %s:\n", itemPfx, child.Name)
+		emitGrouped(buf, child.Children, itemIndent+2)
 	}
 
+	// Emit remaining children indented
 	childPfx := strings.Repeat(" ", itemIndent+2)
-
-	for _, child := range rest {
+	for i, child := range children {
+		if i == nameIdx {
+			continue
+		}
 		if len(child.Children) == 0 {
 			fmt.Fprintf(buf, "%s%s: %s\n", childPfx, child.Name, yq(child.Text))
 		} else {
@@ -329,6 +358,12 @@ func emitSeqItem(buf *bytes.Buffer, children []bufNode, itemIndent int) {
 	}
 }
 
+// isBooleanText returns true if t is a boolean-valued string.
+// Used by emitSeqItem to identify the "name" child in repeated sections.
+func isBooleanText(t string) bool {
+	return t == "true" || t == "false"
+}
+
 // yq wraps a string in YAML-safe double quotes.
 func yq(s string) string {
 	s = strings.ReplaceAll(s, "\\", "\\\\")
@@ -336,7 +371,128 @@ func yq(s string) string {
 	return `"` + s + `"`
 }
 
-// deriveOutputPath replaces the .profile-meta.xml suffix with .profile-meta.yaml.
-func deriveOutputPath(inputPath string) string {
-	return strings.TrimSuffix(inputPath, ".profile-meta.xml") + ".profile-meta.yaml"
+
+// findPermSets walks dir searching for *.permissionset-meta.xml files.
+func findPermSets(dir string) ([]string, error) {
+	var files []string
+
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // skip inaccessible entries
+		}
+
+		if d.IsDir() {
+			return nil
+		}
+
+		if strings.HasSuffix(d.Name(), ".permissionset-meta.xml") {
+			files = append(files, path)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walk %s: %w", dir, err)
+	}
+
+	return files, nil
+}
+
+// filterByPermSetNames returns only the perm set paths whose base name (without
+// .permissionset-meta.xml) matches one of the given names. The available names are
+// returned alongside for error reporting.
+func filterByPermSetNames(permsets []string, names []string) (matched []string, available []string, err error) {
+	available = make([]string, 0, len(permsets))
+	byName := make(map[string]string, len(permsets))
+
+	for _, p := range permsets {
+		base := filepath.Base(p)
+		name := strings.TrimSuffix(base, ".permissionset-meta.xml")
+		available = append(available, name)
+		byName[name] = p
+	}
+
+	missing := make([]string, 0, len(names))
+
+	for _, n := range names {
+		if p, ok := byName[n]; ok {
+			matched = append(matched, p)
+		} else {
+			missing = append(missing, n)
+		}
+	}
+
+	if len(missing) > 0 {
+		sort.Strings(available)
+
+		return nil, available, fmt.Errorf("permission sets not found: %s; available: %s",
+			strings.Join(missing, ", "),
+			strings.Join(available, ", "))
+	}
+
+	return matched, available, nil
+}
+
+// findAndFilterPermSets discovers all *.permissionset-meta.xml files under
+// projectPath and filters them according to permsetName (single) or
+// permsetsCSV (comma-separated list). If both are empty, all discovered perm
+// sets are returned. permsetName and permsetsCSV must not both be set — the
+// caller (CLI) enforces this via MarkFlagsMutuallyExclusive.
+func findAndFilterPermSets(projectPath, permsetName, permsetsCSV string) ([]string, error) {
+	all, err := findPermSets(projectPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if permsetName != "" {
+		matched, _, err := filterByPermSetNames(all, []string{permsetName})
+		if err != nil {
+			return nil, err
+		}
+
+		return matched, nil
+	}
+
+	if permsetsCSV != "" {
+		names := strings.Split(permsetsCSV, ",")
+
+		for i := range names {
+			names[i] = strings.TrimSpace(names[i])
+		}
+
+		matched, _, err := filterByPermSetNames(all, names)
+		if err != nil {
+			return nil, err
+		}
+
+		return matched, nil
+	}
+
+	return all, nil
+}
+
+// ConvertPermSets discovers *.permissionset-meta.xml files under projectPath,
+// filters by permsetName (single) or permsetsCSV (comma-separated) if provided,
+// converts each to YAML, writes the output to disk, and prints progress to stderr.
+// permsetName and permsetsCSV must not both be set — the caller enforces this.
+func ConvertPermSets(projectPath, permsetName, permsetsCSV string) error {
+	permsets, err := findAndFilterPermSets(projectPath, permsetName, permsetsCSV)
+	if err != nil {
+		return err
+	}
+
+	for _, permsetPath := range permsets {
+		outPath, yamlBytes, err := ConvertPermSetFile(permsetPath)
+		if err != nil {
+			return fmt.Errorf("convert %s: %w", permsetPath, err)
+		}
+		if err := os.WriteFile(outPath, yamlBytes, 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", outPath, err)
+		}
+
+		fmt.Fprintf(os.Stderr, "Converted: %s\n", filepath.Base(permsetPath))
+	}
+	fmt.Fprintf(os.Stderr, "Done. %d permset(s) converted.\n", len(permsets))
+
+	return nil
 }
