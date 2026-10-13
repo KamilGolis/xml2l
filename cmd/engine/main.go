@@ -33,7 +33,7 @@ func main() {
 }
 
 func addPathFlag(cmd *cobra.Command) {
-	cmd.Flags().StringP("path", "p", "", "Path to the root SFDX project directory (required)")
+	cmd.Flags().StringP("path", "p", "", "Path to the Salesforce metadata directory, e.g. force-app/main/default (required)")
 }
 
 func newProfileCmd() *cobra.Command {
@@ -62,15 +62,17 @@ func deriveExportBase(projectPath string) string {
 
 func newDiffCmd() *cobra.Command {
 	details := false
+	repo := false
 	export := ""
-	exportFmt := "text"
 	exportOut := ""
 	cmd := &cobra.Command{
 		Use:   "diff",
 		Short: "Compare profiles and report missing permissions",
 		Long: `Compares profiles and reports tags present in some profiles but missing from others.
 Tags present in every profile are suppressed (shared). Use --details to also show
-permission value differences for shared tags. Use --export to write the report to a file.`,
+permission value differences for shared tags. Use --repo to cross-reference profile
+permissions against the filesystem. Use --export or --export-out to write the report
+to a file.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectPath, _ := cmd.Flags().GetString("path")
 
@@ -87,41 +89,32 @@ permission value differences for shared tags. Use --export to write the report t
 				return fmt.Errorf("diff requires at least 2 profiles, found %d", len(g.ProfileNodes))
 			}
 
-			if details {
-				hasAdmin := false
-				for _, pn := range g.ProfileNodes {
-					if pn.Name == "Admin" {
-						hasAdmin = true
-						break
-					}
-				}
-
-				if !hasAdmin {
-					return fmt.Errorf("--details requires an Admin profile; none found in %s", projectPath)
-				}
+			repoPath := ""
+			if repo {
+				repoPath = projectPath
 			}
 
-			report := reportpkg.ComputeDiff(g, details, projectPath)
+			report := reportpkg.ComputeDiff(g, details, repoPath)
 
-			exportFmtVal := export
-			if export == "" {
-				exportFmtVal = exportFmt
-			}
+			if export != "" || exportOut != "" {
+				exportFmt := export
+				if exportFmt == "" {
+					exportFmt = "json" // file default
+				}
 
-			if export != "" || exportFmt != "text" {
 				outPath := exportOut
 
 				if outPath == "" {
-					base := deriveExportBase(projectPath)
 					ext := "json"
-					if exportFmtVal == "text" {
+					if exportFmt == "text" {
 						ext = "txt"
 					}
-					outPath = base + ".diff." + ext
+
+					outPath = deriveExportBase(projectPath) + ".diff." + ext
 				}
 
 				var content string
-				switch exportFmtVal {
+				switch exportFmt {
 				case "json":
 					out, err := json.MarshalIndent(report, "", "  ")
 					if err != nil {
@@ -131,7 +124,7 @@ permission value differences for shared tags. Use --export to write the report t
 				case "text":
 					content = reportpkg.FormatDiffText(report)
 				default:
-					return fmt.Errorf("unsupported export format: %s (supported: json, text)", exportFmtVal)
+					return fmt.Errorf("unsupported export format: %s (supported: json, text)", exportFmt)
 				}
 
 				if err := os.WriteFile(outPath, []byte(content), 0o644); err != nil {
@@ -148,9 +141,9 @@ permission value differences for shared tags. Use --export to write the report t
 	}
 	addPathFlag(cmd)
 	cmd.Flags().BoolVar(&details, "details", false, "Include permission value differences for shared tags")
-	cmd.Flags().StringVarP(&export, "export", "e", "", "Export format: json or text (default: text for stdout, json for file)")
-	cmd.Flags().StringVar(&exportFmt, "export-format", "text", "Export format when --export is used")
-	cmd.Flags().StringVar(&exportOut, "export-out", "", "Output path for the export file (auto-derived when empty)")
+	cmd.Flags().BoolVar(&repo, "repo", false, "Cross-reference profile permissions against the filesystem")
+	cmd.Flags().StringVarP(&export, "export", "e", "", "Export the report to a file; format is json or text (default: json)")
+	cmd.Flags().StringVar(&exportOut, "export-out", "", "Output path for the export file (auto-derived when empty; implies --export)")
 	return cmd
 }
 
@@ -210,7 +203,7 @@ func newSaveCmd() *cobra.Command {
 	addPathFlag(cmd)
 	cmd.Flags().BoolVarP(&useOrgSchema, "use-org-schema", "s", false, "Cross-check metadata against Salesforce org schema before saving")
 	cmd.Flags().StringVarP(&orgFlag, "org", "o", "", "Salesforce org alias (default: SF CLI default org)")
-	cmd.Flags().StringVarP(&excludeFlag, "exclude", "e", "", "Comma-separated case-insensitive substrings; matching entries skip normalization and preserve original XML (requires --use-org-schema)")
+	cmd.Flags().StringVarP(&excludeFlag, "exclude", "e", "", "Comma-separated case-insensitive prefixes; matching entries skip normalization and preserve original XML (requires --use-org-schema)")
 	return cmd
 }
 

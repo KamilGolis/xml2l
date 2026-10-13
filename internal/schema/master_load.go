@@ -63,7 +63,11 @@ func LoadProfiles(projectPath string) (*graph.SalesforceGraph, error) {
 		profileName := filepath.Base(r.Path)
 		profileName = profileName[:len(profileName)-len(".profile-meta.xml")]
 
-		p := g.AddProfile(profileName, r.Path)
+		p, err := g.AddProfile(profileName, r.Path)
+		if err != nil {
+			return nil, err
+		}
+
 		p.RawXML = string(r.Raw)
 		p.UserLicense = r.Profile.UserLicense
 		p.Description = r.Profile.Description

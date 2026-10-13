@@ -371,7 +371,6 @@ func yq(s string) string {
 	return `"` + s + `"`
 }
 
-
 // findPermSets walks dir searching for *.permissionset-meta.xml files.
 func findPermSets(dir string) ([]string, error) {
 	var files []string
