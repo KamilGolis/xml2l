@@ -60,7 +60,7 @@ func TestJSONExporter(t *testing.T) {
 				if e.Data.Enabled == nil || !*e.Data.Enabled {
 					t.Error("expected enabled=true on class edge")
 				}
-			} else if e.Data.Target == "Field:Account.Name" {
+			} else if e.Data.Target == "CustomField:Account.Name" {
 				if e.Data.Readable == nil || !*e.Data.Readable {
 					t.Error("expected readable=true on field edge")
 				}
@@ -166,7 +166,7 @@ func TestDOTExporterEmptyGraph(t *testing.T) {
 // with known properties for testing exporters.
 func newTestGraph() *SalesforceGraph {
 	g := NewGraph()
-	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
 
 	cls := g.GetOrCreateMetadataNode(MetaTypeApexClass, "MyClass")
 	enabled := true

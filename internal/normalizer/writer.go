@@ -3,6 +3,7 @@ package normalizer
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 
@@ -43,7 +44,7 @@ func WriteProfiles(g NormalizeGraph) error {
 				return
 			}
 
-			if err := os.WriteFile(profile.SourcePath, xmlBytes, 0644); err != nil {
+			if err := writeFileAtomic(profile.SourcePath, xmlBytes); err != nil {
 				errs <- fmt.Errorf("Write %s: %w", profile.SourcePath, err)
 			} else {
 				fmt.Fprintf(os.Stderr, "Normalized: %s\n", profile.Name)
@@ -64,4 +65,48 @@ func WriteProfiles(g NormalizeGraph) error {
 	}
 
 	return firstErr
+}
+
+// writeFileAtomic writes data to path through a temporary file in the same
+// directory followed by a rename. A crash or interrupt mid-write leaves the
+// original profile intact instead of truncating it, and the existing file
+// mode is preserved.
+func writeFileAtomic(path string, data []byte) error {
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+
+	tmpName := tmp.Name()
+	defer func() {
+		if tmpName != "" {
+			os.Remove(tmpName)
+		}
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+
+	if err := tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		return err
+	}
+
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+
+	tmpName = "" // renamed into place; nothing left to clean up
+	return nil
 }

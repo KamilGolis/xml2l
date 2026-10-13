@@ -11,8 +11,8 @@ import (
 
 func newTestGraph() *graph.SalesforceGraph {
 	g := graph.NewGraph()
-	_ = g.AddProfile("Admin", "")
-	_ = g.AddProfile("Customer Service", "")
+	_, _ = g.AddProfile("Admin", "")
+	_, _ = g.AddProfile("Customer Service", "")
 
 	return g
 }
@@ -131,8 +131,8 @@ func TestComputeDiff_ValueDifferences(t *testing.T) {
 
 func TestComputeDiff_IdenticalProfiles(t *testing.T) {
 	g := graph.NewGraph()
-	_ = g.AddProfile("Admin", "")
-	_ = g.AddProfile("Clone", "")
+	_, _ = g.AddProfile("Admin", "")
+	_, _ = g.AddProfile("Clone", "")
 	addEdge(g, "Admin", "ApexClass", "ClassA", graph.EdgeProperties{Enabled: boolPtr(true)})
 	addEdge(g, "Admin", "ApexClass", "ClassB", graph.EdgeProperties{Enabled: boolPtr(true)})
 	addEdge(g, "Clone", "ApexClass", "ClassA", graph.EdgeProperties{Enabled: boolPtr(true)})
@@ -148,8 +148,8 @@ func TestComputeDiff_IdenticalProfiles(t *testing.T) {
 
 func TestComputeDiff_DisjointProfiles(t *testing.T) {
 	g := graph.NewGraph()
-	_ = g.AddProfile("A", "")
-	_ = g.AddProfile("B", "")
+	_, _ = g.AddProfile("A", "")
+	_, _ = g.AddProfile("B", "")
 	addEdge(g, "A", "ApexClass", "ClassA", graph.EdgeProperties{Enabled: boolPtr(true)})
 	addEdge(g, "B", "ApexClass", "ClassB", graph.EdgeProperties{Enabled: boolPtr(true)})
 
@@ -174,7 +174,7 @@ func TestComputeDiff_DisjointProfiles(t *testing.T) {
 
 func TestComputeDiff_SingleProfile(t *testing.T) {
 	g := graph.NewGraph()
-	_ = g.AddProfile("Only", "")
+	_, _ = g.AddProfile("Only", "")
 	addEdge(g, "Only", "ApexClass", "ClassA", graph.EdgeProperties{Enabled: boolPtr(true)})
 
 	r := ComputeDiff(g, false, "")
@@ -391,7 +391,7 @@ func TestScanRepo_MissingDirectories(t *testing.T) {
 
 func TestCrossReference_MissingAndUnreferenced(t *testing.T) {
 	g := graph.NewGraph()
-	_ = g.AddProfile("Admin", "")
+	_, _ = g.AddProfile("Admin", "")
 
 	g.GetOrCreateMetadataNode(graph.MetaTypeApexClass, "DeletedClass")
 
@@ -441,7 +441,7 @@ func TestCrossReference_MissingAndUnreferenced(t *testing.T) {
 
 func TestCrossReference_ExcludedTypes(t *testing.T) {
 	g := graph.NewGraph()
-	_ = g.AddProfile("Admin", "")
+	_, _ = g.AddProfile("Admin", "")
 	g.GetOrCreateMetadataNode(graph.MetaTypeUserPerm, "ModifyAllData")
 
 	repoFiles := map[string]map[string]bool{}
@@ -508,7 +508,7 @@ func TestFormatDiffText_CrossRef(t *testing.T) {
 
 func TestComputeDiff_WithRepoPath(t *testing.T) {
 	g := graph.NewGraph()
-	_ = g.AddProfile("Admin", "")
+	_, _ = g.AddProfile("Admin", "")
 	mn := g.GetOrCreateMetadataNode(graph.MetaTypeApexClass, "TestClass")
 	admin := g.ProfileNodes["Admin"]
 	g.AddEdge(admin, mn, graph.EdgeProperties{Enabled: boolPtr(true)})
@@ -516,10 +516,15 @@ func TestComputeDiff_WithRepoPath(t *testing.T) {
 	dir := t.TempDir()
 	mkFile(t, dir, "classes/OtherClass.cls")
 
-	r := ComputeDiff(g, true, dir)
+	// Cross-reference is independent of --details.
+	r := ComputeDiff(g, false, dir)
 
 	if r.CrossRef == nil {
 		t.Fatal("expected crossRef when repo path is provided")
+	}
+
+	if len(r.ValueDifferences) != 0 {
+		t.Errorf("expected no value differences without details, got %d", len(r.ValueDifferences))
 	}
 
 	found := false

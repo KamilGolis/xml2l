@@ -16,14 +16,11 @@ type OrgSchema struct {
 	entries map[string]map[string]bool
 }
 
-// metadataTypesResult maps to the output of `sf org list metadata-types --json`.
+// metadataTypesResult maps the status field of `sf org list metadata-types
+// --json`. The metadataObjects list is not needed: child types such as
+// CustomField and RecordType are queryable without appearing in it.
 type metadataTypesResult struct {
 	Status int `json:"status"`
-	Result struct {
-		MetadataObjects []struct {
-			XMLName string `json:"xmlName"`
-		} `json:"metadataObjects"`
-	} `json:"result"`
 }
 
 // metadataListResult maps to the output of `sf org list metadata -m <type> --json`.
@@ -99,12 +96,16 @@ func New() *OrgSchema {
 // Fetch queries the Salesforce org for available metadata types and their
 // members, building an in-memory OrgSchema. When orgName is non-empty, the
 // -o flag is appended to every sf command to target the specified org.
-// Priority types are always queried; if a type is not supported by the org,
-// it is treated as empty (SKIP logged to stderr). Only the initial
-// metadata-types query is treated as a hard failure.
+//
+// Only types whose member query succeeded are registered. A type whose query
+// fails (transient error, unsupported type, missing permission) is left
+// unregistered, so HasType reports false and normalization skips filtering
+// for it instead of treating the org as empty. The initial metadata-types
+// query is a hard failure — if the org cannot be reached at all, Fetch fails
+// rather than returning a schema that would strip every permission.
 func Fetch(orgName string) (*OrgSchema, error) {
-	// Step 1: Get available metadata types.
-	if _, err := fetchMetadataTypes(orgName); err != nil {
+	// Step 1: Verify the org is reachable and exposes metadata types.
+	if err := fetchMetadataTypes(orgName); err != nil {
 		return nil, err
 	}
 
@@ -117,8 +118,10 @@ func Fetch(orgName string) (*OrgSchema, error) {
 
 		names, err := fetchMetadataList(mt, orgName)
 		if err != nil {
+			// Leave the type unregistered: an unavailable type must not be
+			// treated as an empty one, or normalization would drop every
+			// entry of that type from every profile.
 			fmt.Fprintf(os.Stderr, "SKIP (%v)\n", err)
-			o.entries[mt] = make(map[string]bool)
 			continue
 		}
 
@@ -150,8 +153,10 @@ func Fetch(orgName string) (*OrgSchema, error) {
 	return o, nil
 }
 
-// fetchMetadataTypes returns the list of xmlName values available in the org.
-func fetchMetadataTypes(orgName string) ([]string, error) {
+// fetchMetadataTypes verifies that the org is reachable and returns the
+// metadata-types response. The type list itself is not needed: child types
+// such as CustomField and RecordType are queryable without appearing here.
+func fetchMetadataTypes(orgName string) error {
 	fmt.Fprintf(os.Stderr, "Getting Org Metadata Types... ")
 
 	args := []string{"org", "list", "metadata-types", "--json"}
@@ -165,35 +170,29 @@ func fetchMetadataTypes(orgName string) ([]string, error) {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			if msg := parseSFError(exitErr.Stderr); msg != "" {
 				fmt.Fprintf(os.Stderr, "ERROR\n")
-				return nil, fmt.Errorf("sf org list metadata-types: %s", msg)
+				return fmt.Errorf("sf org list metadata-types: %s", msg)
 			}
 		}
 
 		fmt.Fprintf(os.Stderr, "ERROR\n")
 
-		return nil, fmt.Errorf("sf org list metadata-types: %w", err)
+		return fmt.Errorf("sf org list metadata-types: %w", err)
 	}
 
 	var result metadataTypesResult
 
 	if err := json.Unmarshal(output, &result); err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR\n")
-		return nil, fmt.Errorf("parse metadata-types response: %w", err)
+		return fmt.Errorf("parse metadata-types response: %w", err)
 	}
 
 	if result.Status != 0 {
 		fmt.Fprintf(os.Stderr, "ERROR\n")
-		return nil, fmt.Errorf("sf org list metadata-types returned status %d", result.Status)
-	}
-
-	var types []string
-
-	for _, mo := range result.Result.MetadataObjects {
-		types = append(types, mo.XMLName)
+		return fmt.Errorf("sf org list metadata-types returned status %d", result.Status)
 	}
 
 	fmt.Fprintf(os.Stderr, "OK\n")
-	return types, nil
+	return nil
 }
 
 // fetchMetadataList returns the list of fullName values for the given metadata

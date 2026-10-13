@@ -251,8 +251,8 @@ func ComputeDiff(g *graph.SalesforceGraph, details bool, repoPath string) *DiffR
 		ValueDifferences: valueDiffs,
 	}
 
-	// Repo cross-reference when path is provided.
-	if repoPath != "" && details {
+	// Repo cross-reference when a repo path is provided.
+	if repoPath != "" {
 		repoFiles, err := ScanRepo(repoPath)
 
 		if err == nil && repoFiles != nil {

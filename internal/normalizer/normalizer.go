@@ -7,19 +7,13 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"sort"
 	"strings"
 
 	"xml2l/internal/graph"
-)
-
-var (
-	reLoginHours       = regexp.MustCompile(`(?s)<loginHours>.*?</loginHours>`)
-	reLoginIpRanges    = regexp.MustCompile(`(?s)<loginIpRanges>.*?</loginIpRanges>`)
-	reLoginFlows       = regexp.MustCompile(`(?s)<loginFlows>.*?</loginFlows>`)
-	reProfileActionOvr = regexp.MustCompile(`(?s)<profileActionOverrides>.*?</profileActionOverrides>`)
 )
 
 // sectionNameField maps each profile section XML tag to the XML element name
@@ -383,9 +377,9 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 		}
 	}
 
-	// Append unmapped sections.
-	unmapped := extractUnmappedSections(p.RawXML)
-	buf.WriteString(unmapped)
+	// Preserve top-level elements the normalizer does not model, in document
+	// order, so a save never drops a section outside the graph's scope.
+	buf.WriteString(extractPreservedSections(p.RawXML))
 
 	buf.WriteString("</Profile>\n")
 	return buf.Bytes()
@@ -543,32 +537,114 @@ func extractRawEntry(rawXML, sectionTag, entryName, nameField string) string {
 	return ""
 }
 
-// extractUnmappedSections extracts unmapped sections from raw XML for preservation.
-// These sections are not modeled in the graph but must be preserved verbatim.
-func extractUnmappedSections(rawXML string) string {
-	if rawXML == "" {
-		return ""
+// modeledTopLevelTags returns the top-level <Profile> child tags the normalizer
+// writes itself. Every other top-level element is preserved verbatim, so
+// sections the normalizer does not model (loginHours, loginIpRanges,
+// loginFlows, profileActionOverrides, fieldLevelSecurities, ...) survive a save.
+func modeledTopLevelTags() map[string]bool {
+	tags := map[string]bool{
+		"userLicense": true,
+		"custom":      true,
+		"description": true,
 	}
-	var result strings.Builder
-	for _, re := range []*regexp.Regexp{reLoginHours, reLoginIpRanges, reLoginFlows, reProfileActionOvr} {
-		for _, m := range re.FindAllString(rawXML, -1) {
-			result.WriteString(indentXMLSection(m))
-		}
+
+	for _, sm := range graph.SectionMetaOrder() {
+		tags[sm.Tag] = true
 	}
-	return strings.TrimSpace(result.String())
+
+	return tags
 }
 
-// indentXMLSection adds 4-space indent to each line of an XML fragment.
-func indentXMLSection(s string) string {
-	lines := strings.Split(s, "\n")
-	var buf bytes.Buffer
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
+// rawElement is a top-level child element of <Profile> captured verbatim.
+type rawElement struct {
+	tag  string
+	body string
+}
+
+// scanTopLevelElements returns the raw text of every direct child of <Profile>
+// in document order. Offsets come from the tokenizer, so nested elements and
+// repeated tags are captured exactly as they appear in the source.
+func scanTopLevelElements(rawXML string) ([]rawElement, error) {
+	if rawXML == "" {
+		return nil, nil
+	}
+
+	dec := xml.NewDecoder(strings.NewReader(rawXML))
+
+	var (
+		elems    []rawElement
+		depth    int
+		start    = int64(-1)
+		startTag string
+	)
+
+	for {
+		before := dec.InputOffset()
+
+		tok, err := dec.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if depth == 1 {
+				start = nextTagOffset(rawXML, before)
+				startTag = t.Name.Local
+			}
+
+			depth++
+		case xml.EndElement:
+			depth--
+
+			if depth == 1 && start >= 0 {
+				elems = append(elems, rawElement{tag: startTag, body: rawXML[start:dec.InputOffset()]})
+				start = -1
+			}
+		}
+	}
+
+	return elems, nil
+}
+
+// nextTagOffset returns the offset of the next '<' at or after from. Callers
+// pass the tokenizer offset captured just before reading a StartElement, which
+// sits immediately after the preceding token (whitespace and comments are
+// tokens too), so the next '<' begins that element.
+func nextTagOffset(s string, from int64) int64 {
+	i := int(from)
+
+	for i < len(s) && s[i] != '<' {
+		i++
+	}
+
+	return int64(i)
+}
+
+// extractPreservedSections returns the top-level elements the normalizer does
+// not model, re-indented and in document order. Returns "" when there is
+// nothing to preserve or the source cannot be parsed.
+func extractPreservedSections(rawXML string) string {
+	elems, err := scanTopLevelElements(rawXML)
+	if err != nil {
+		return ""
+	}
+
+	modeled := modeledTopLevelTags()
+
+	var buf strings.Builder
+
+	for _, el := range elems {
+		if modeled[el.tag] {
 			continue
 		}
-		buf.WriteString("    " + trimmed + "\n")
+
+		buf.WriteString(reindentEntry(el.body))
 	}
+
 	return buf.String()
 }
 
