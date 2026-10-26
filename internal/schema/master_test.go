@@ -234,3 +234,57 @@ func writeProfile(t *testing.T, dir, name, content string) {
 		t.Fatal(err)
 	}
 }
+
+func TestLoadProfilesRejectsDuplicateProfileNames(t *testing.T) {
+	dir := t.TempDir()
+
+	content := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <userLicense>Salesforce</userLicense>
+</Profile>`
+
+	for _, pkg := range []string{"pkgA", "pkgB"} {
+		pkgDir := filepath.Join(dir, pkg, "profiles")
+
+		if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		writeProfile(t, pkgDir, "Admin.profile-meta.xml", content)
+	}
+
+	_, err := LoadProfiles(dir)
+	if err == nil {
+		t.Fatal("expected an error for duplicate profile names")
+	}
+
+	if !strings.Contains(err.Error(), "duplicate profile name") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadProfilesAcceptsUniqueNames(t *testing.T) {
+	dir := t.TempDir()
+	profDir := filepath.Join(dir, "profiles")
+
+	if err := os.MkdirAll(profDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	content := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <userLicense>Salesforce</userLicense>
+</Profile>`
+
+	writeProfile(t, profDir, "Admin.profile-meta.xml", content)
+	writeProfile(t, profDir, "User.profile-meta.xml", content)
+
+	g, err := LoadProfiles(dir)
+	if err != nil {
+		t.Fatalf("LoadProfiles: %v", err)
+	}
+
+	if len(g.ProfileNodes) != 2 {
+		t.Errorf("expected 2 profiles, got %d", len(g.ProfileNodes))
+	}
+}

@@ -4,6 +4,8 @@
 // fields, objects, tabs, etc.).
 package graph
 
+import "fmt"
+
 // MetadataType enumerates the categories of permission targets found in
 // Salesforce profile definitions.
 type MetadataType string
@@ -172,17 +174,20 @@ func NewGraph() *SalesforceGraph {
 	}
 }
 
-// AddProfile creates a ProfileNode and registers it in the graph. If a profile
-// with the same name already exists, the existing node is returned.
-func (g *SalesforceGraph) AddProfile(name, path string) *ProfileNode {
+// AddProfile creates a ProfileNode and registers it in the graph. Two profiles
+// that share a base name (for example the same profile name in two package
+// directories) would otherwise be merged into one node, mixing their
+// permissions and writing one file's content over the other. Such a project is
+// invalid for deployment, so it is reported as an error instead.
+func (g *SalesforceGraph) AddProfile(name, path string) (*ProfileNode, error) {
 	if existing, ok := g.ProfileNodes[name]; ok {
-		return existing
+		return existing, fmt.Errorf("duplicate profile name %q: %s and %s", name, existing.SourcePath, path)
 	}
 
 	p := &ProfileNode{Name: name, SourcePath: path}
 	g.ProfileNodes[name] = p
 
-	return p
+	return p, nil
 }
 
 // GetOrCreateMetadataNode returns the MetadataNode for the given type and name

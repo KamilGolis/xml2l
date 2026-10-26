@@ -3,6 +3,8 @@ package normalizer
 import (
 	"bytes"
 	"encoding/xml"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -151,7 +153,7 @@ func TestNormalizeProfileBackfill(t *testing.T) {
 
 	g := graph.NewGraph()
 	g.SetMasterSchema(ms)
-	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
 
 	// Profile has Existing__c and ClassA, but NOT Revenue__c or ClassB.
 	fieldNode := g.GetOrCreateMetadataNode(graph.MetaTypeField, "Account.Existing__c")
@@ -194,7 +196,7 @@ func TestNormalizeProfileLayoutNoBackfill(t *testing.T) {
 
 	g := graph.NewGraph()
 	g.SetMasterSchema(ms)
-	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
 
 	// Profile has Account-Account Layout only.
 	layoutNode := g.GetOrCreateMetadataNode(graph.MetaTypeLayout, "Account-Account Layout")
@@ -222,7 +224,7 @@ func TestNormalizeProfileLayoutSortByRecordType(t *testing.T) {
 	ms := schema.NewMasterSchema()
 	g := graph.NewGraph()
 	g.SetMasterSchema(ms)
-	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
 
 	// Add same layout with two record types + one without.
 	layoutNode := g.GetOrCreateMetadataNode(graph.MetaTypeLayout, "Account-Account Layout")
@@ -263,7 +265,7 @@ func TestNormalizeProfileLayoutDefaultFromDisk(t *testing.T) {
 		"Account-HCO Layout",
 		"Contact-Patient Layout",
 	})
-	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
 
 	// Profile has NO layout assignments at all.
 	xmlBytes := NormalizeProfile(p, g)
@@ -291,7 +293,7 @@ func TestNormalizeProfileLayoutNoDefaultWhenEntriesExist(t *testing.T) {
 		"Account-HCO Layout",
 		"Contact-Patient Layout",
 	})
-	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
 
 	rt := "Account.HCO"
 	node := g.GetOrCreateMetadataNode(graph.MetaTypeLayout, "Account-Custom Layout")
@@ -317,7 +319,7 @@ func TestNormalizeProfileLayoutFiltersMultipleNoRecordType(t *testing.T) {
 	ms := schema.NewMasterSchema()
 	g := graph.NewGraph()
 	g.SetMasterSchema(ms)
-	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
 
 	layouts := []struct {
 		name string
@@ -368,7 +370,7 @@ func TestNormalizeProfileLayoutDedupRecordTypes(t *testing.T) {
 	ms := schema.NewMasterSchema()
 	g := graph.NewGraph()
 	g.SetMasterSchema(ms)
-	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
 
 	rt := "Account.HCO"
 	node1 := g.GetOrCreateMetadataNode(graph.MetaTypeLayout, "Account-Alpha Layout")
@@ -396,7 +398,7 @@ func TestNormalizeProfileXMLHeader(t *testing.T) {
 	ms := schema.NewMasterSchema()
 	g := graph.NewGraph()
 	g.SetMasterSchema(ms)
-	p := g.AddProfile("Admin", "test.profile-meta.xml")
+	p, _ := g.AddProfile("Admin", "test.profile-meta.xml")
 	p.UserLicense = "Salesforce"
 
 	xmlBytes := NormalizeProfile(p, g)
@@ -411,10 +413,14 @@ func TestNormalizeProfileXMLHeader(t *testing.T) {
 	}
 }
 
-func TestExtractUnmappedSections(t *testing.T) {
+func TestExtractPreservedSections(t *testing.T) {
 	rawXML := `<?xml version="1.0"?>
 <Profile xmlns="http://soap.sforce.com/2006/04/metadata">
     <userLicense>Salesforce</userLicense>
+    <classAccesses>
+        <apexClass>MyClass</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
     <loginHours>
         <dayOfWeek>Monday</dayOfWeek>
     </loginHours>
@@ -426,53 +432,57 @@ func TestExtractUnmappedSections(t *testing.T) {
     </loginIpRanges>
     <loginFlows>
         <flowType>LoginFlow</flowType>
-        <userLicense>Salesforce</userLicense>
         <flow>MyFlow</flow>
     </loginFlows>
+    <fieldLevelSecurities>
+        <field>Account.Legacy__c</field>
+        <hidden>false</hidden>
+    </fieldLevelSecurities>
     <profileActionOverrides>
         <actionName>Tab</actionName>
     </profileActionOverrides>
 </Profile>`
 
-	unmapped := extractUnmappedSections(rawXML)
+	preserved := extractPreservedSections(rawXML)
 
-	if !strings.Contains(unmapped, "loginHours") {
-		t.Error("missing loginHours")
+	for _, tag := range []string{"loginHours", "loginIpRanges", "loginFlows", "fieldLevelSecurities", "profileActionOverrides"} {
+		if !strings.Contains(preserved, tag) {
+			t.Errorf("missing %s", tag)
+		}
 	}
 
-	if !strings.Contains(unmapped, "loginIpRanges") {
-		t.Error("missing loginIpRanges")
-	}
-
-	if !strings.Contains(unmapped, "loginFlows") {
-		t.Error("missing loginFlows")
-	}
-
-	if !strings.Contains(unmapped, "profileActionOverrides") {
-		t.Error("missing profileActionOverrides")
-	}
-
-	if !strings.Contains(unmapped, "Monday") {
+	if !strings.Contains(preserved, "Monday") {
 		t.Error("missing loginHours content")
 	}
 
 	// Verify both loginIpRanges entries are preserved.
-	if strings.Count(unmapped, "    <loginIpRanges>") != 2 {
-		t.Errorf("expected 2 loginIpRanges entries, got %d", strings.Count(unmapped, "    <loginIpRanges>"))
+	if strings.Count(preserved, "    <loginIpRanges>") != 2 {
+		t.Errorf("expected 2 loginIpRanges entries, got %d", strings.Count(preserved, "    <loginIpRanges>"))
 	}
 
-	if !strings.Contains(unmapped, "MyFlow") {
+	if !strings.Contains(preserved, "MyFlow") {
 		t.Error("missing loginFlows content")
+	}
+
+	// Modeled sections are written by the normalizer, so they must not be
+	// preserved here.
+	if strings.Contains(preserved, "classAccesses") {
+		t.Error("classAccesses is modeled and should not be preserved")
 	}
 }
 
-func TestExtractUnmappedSectionsEmpty(t *testing.T) {
-	if got := extractUnmappedSections(""); got != "" {
+func TestExtractPreservedSectionsEmpty(t *testing.T) {
+	if got := extractPreservedSections(""); got != "" {
 		t.Errorf("expected empty, got %q", got)
 	}
 
-	if got := extractUnmappedSections("<Profile/>"); got != "" {
+	if got := extractPreservedSections("<Profile/>"); got != "" {
 		t.Errorf("expected empty for Profile-only, got %q", got)
+	}
+
+	// Malformed input must not panic and must yield no preservation.
+	if got := extractPreservedSections("<Profile><oops>"); got != "" {
+		t.Errorf("expected empty for malformed XML, got %q", got)
 	}
 }
 
@@ -490,7 +500,7 @@ func TestNormalizeProfilePreservesLoginHours(t *testing.T) {
 	ms := schema.NewMasterSchema()
 	g := graph.NewGraph()
 	g.SetMasterSchema(ms)
-	p := g.AddProfile("Admin", "test.profile-meta.xml")
+	p, _ := g.AddProfile("Admin", "test.profile-meta.xml")
 	p.RawXML = rawXML
 	p.UserLicense = "Salesforce"
 
@@ -520,7 +530,7 @@ func TestNormalizeProfilePreservesLoginFlows(t *testing.T) {
 	ms := schema.NewMasterSchema()
 	g := graph.NewGraph()
 	g.SetMasterSchema(ms)
-	p := g.AddProfile("Admin", "test.profile-meta.xml")
+	p, _ := g.AddProfile("Admin", "test.profile-meta.xml")
 	p.RawXML = rawXML
 	p.UserLicense = "Salesforce"
 
@@ -546,7 +556,7 @@ func TestWriteProfiles(t *testing.T) {
 
 	g := graph.NewGraph()
 	g.SetMasterSchema(ms)
-	p := g.AddProfile("Test", "test_save_output.profile-meta.xml")
+	p, _ := g.AddProfile("Test", "test_save_output.profile-meta.xml")
 	_ = p
 
 	// Since there's no real file path to write to, just verify the function
@@ -568,7 +578,7 @@ func TestNormalizeProfileValidXML(t *testing.T) {
 
 	g := graph.NewGraph()
 	g.SetMasterSchema(ms)
-	p := g.AddProfile("Admin", "test.profile-meta.xml")
+	p, _ := g.AddProfile("Admin", "test.profile-meta.xml")
 	p.UserLicense = "Salesforce"
 
 	xmlBytes := NormalizeProfile(p, g)
@@ -599,7 +609,7 @@ func TestNormalizeProfileTabVisBackfillNoEmptyTag(t *testing.T) {
 
 	g := graph.NewGraph()
 	g.SetMasterSchema(ms)
-	p := g.AddProfile("Admin", "test.profile-meta.xml")
+	p, _ := g.AddProfile("Admin", "test.profile-meta.xml")
 
 	xmlBytes := NormalizeProfile(p, g)
 	output := string(xmlBytes)
@@ -627,7 +637,7 @@ func TestNormalizeProfileAlphabeticalSort(t *testing.T) {
 
 	g := graph.NewGraph()
 	g.SetMasterSchema(ms)
-	p := g.AddProfile("Admin", "test.profile-meta.xml")
+	p, _ := g.AddProfile("Admin", "test.profile-meta.xml")
 
 	xmlBytes := NormalizeProfile(p, g)
 
@@ -692,7 +702,7 @@ func TestNormalizeProfileOrgSchemaFiltersApexClass(t *testing.T) {
 		"ApexClass":   {"ClassA": true},
 	}))
 
-	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
 	// Profile has ClassA (from graph edges).
 	nodeA := g.GetOrCreateMetadataNode(graph.MetaTypeApexClass, "ClassA")
 	g.AddEdge(p, nodeA, graph.EdgeProperties{Enabled: boolPtr(true)})
@@ -728,7 +738,7 @@ func TestNormalizeProfileOrgSchemaFiltersLayouts(t *testing.T) {
 		"Layout":    {"Account-Account Layout": true, "Contact-Patient Layout": true},
 	}))
 
-	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
 
 	xmlBytes := NormalizeProfile(p, g)
 	output := string(xmlBytes)
@@ -870,7 +880,7 @@ func TestNormalizeProfileExcludePreservesOriginal(t *testing.T) {
 	g.SetMasterSchema(ms)
 	g.SetExcludePatterns([]string{"chatter"})
 
-	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
 	p.RawXML = raw
 	p.UserLicense = "Salesforce"
 
@@ -913,7 +923,7 @@ func TestNormalizeProfileExcludeDropsBackfilled(t *testing.T) {
 	g.SetMasterSchema(ms)
 	g.SetExcludePatterns([]string{"chatter"})
 
-	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
 	p.RawXML = raw
 	p.UserLicense = "Salesforce"
 
@@ -965,7 +975,7 @@ func TestNormalizeProfileExcludeOrdering(t *testing.T) {
 	g.SetMasterSchema(ms)
 	g.SetExcludePatterns([]string{"excluded"})
 
-	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
 	p.RawXML = raw
 	p.UserLicense = "Salesforce"
 
@@ -1013,7 +1023,7 @@ func TestNormalizeProfileExcludeNoEffectWhenOmitted(t *testing.T) {
 	g.SetMasterSchema(ms)
 	// Deliberately NOT setting ExcludePatterns.
 
-	p := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
 	p.RawXML = raw
 	p.UserLicense = "Salesforce"
 
@@ -1034,3 +1044,103 @@ func TestNormalizeProfileExcludeNoEffectWhenOmitted(t *testing.T) {
 func strPtr(s string) *string { return &s }
 
 func boolPtr(b bool) *bool { return &b }
+
+func TestNormalizeProfilePreservesUnmodeledSections(t *testing.T) {
+	rawXML := `<?xml version="1.0"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <userLicense>Salesforce</userLicense>
+    <fieldLevelSecurities>
+        <field>Account.Legacy__c</field>
+        <hidden>false</hidden>
+    </fieldLevelSecurities>
+    <loginHours>
+        <dayOfWeek>Monday</dayOfWeek>
+    </loginHours>
+</Profile>`
+
+	ms := schema.NewMasterSchema()
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+	p, _ := g.AddProfile("Admin", "test.profile-meta.xml")
+	p.RawXML = rawXML
+	p.UserLicense = "Salesforce"
+
+	out := string(NormalizeProfile(p, g))
+
+	for _, tag := range []string{"fieldLevelSecurities", "loginHours"} {
+		if !strings.Contains(out, tag) {
+			t.Errorf("unmodeled section %s was dropped", tag)
+		}
+	}
+
+	if strings.Contains(out, "</loginHours></Profile>") {
+		t.Error("preserved sections must not be glued to the closing tag")
+	}
+
+	if strings.Count(out, "<userLicense>") != 1 {
+		t.Errorf("userLicense should appear once, got %d", strings.Count(out, "<userLicense>"))
+	}
+}
+
+func TestNormalizeProfileOrgSchemaUnqueriedTypeKeepsEntries(t *testing.T) {
+	ms := schema.NewMasterSchema()
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+
+	// The org schema knows CustomField but never queried ApexClass (its query
+	// failed or the type is unsupported). Entries of an unqueried type must
+	// survive, not be treated as absent.
+	g.SetOrgSchema(newMockOrgSchema(map[string]map[string]bool{
+		"CustomField": {},
+	}))
+
+	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	node := g.GetOrCreateMetadataNode(graph.MetaTypeApexClass, "ClassA")
+	g.AddEdge(p, node, graph.EdgeProperties{Enabled: boolPtr(true)})
+
+	out := string(NormalizeProfile(p, g))
+
+	if !strings.Contains(out, "ClassA") {
+		t.Error("entries of an unqueried type must not be filtered out")
+	}
+}
+
+func TestWriteFileAtomic(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "X.profile-meta.xml")
+
+	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeFileAtomic(path, []byte("new")); err != nil {
+		t.Fatalf("writeFileAtomic: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(got) != "new" {
+		t.Errorf("content = %q, want %q", got, "new")
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("mode = %v, want 0600 (preserved)", info.Mode().Perm())
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(entries) != 1 {
+		t.Errorf("expected only the target file, got %d entries (temp file left behind?)", len(entries))
+	}
+}

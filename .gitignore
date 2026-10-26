@@ -29,3 +29,6 @@ coverage/
 # SDD
 openspec/
 data/
+
+# Other
+dist/

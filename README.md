@@ -38,7 +38,7 @@ The graph model is bipartite — one side is profiles, the other is permission t
 | `classAccesses` | enabled | `enabled: false` |
 | `agentAccesses` | enabled | `enabled: false` |
 | `fieldPermissions` | readable, editable | `readable: false`, `editable: false` |
-| `fieldLevelSecurities` | hidden | — (not backfilled as separate section — `fieldPermissions` covers visibility) |
+| `fieldLevelSecurities` | hidden | preserved verbatim (not modeled or backfilled — `fieldPermissions` covers visibility) |
 | `objectPermissions` | allowRead, allowCreate, allowEdit, allowDelete, modifyAll, viewAll | all six `: false` |
 | `layoutAssignments` | layout, recordType | not backfilled (Salesforce requires at most one layout per object without recordType) |
 | `tabVisibilities` | visibility | `visibility: "Hidden"` |
@@ -52,8 +52,14 @@ The graph model is bipartite — one side is profiles, the other is permission t
 | `categoryGroupVisibilities` | visible | no boolean defaults (string-typed) |
 | `loginFlows` | enabled | no boolean defaults (unstructured/profile-level) |
 | `externalDataSourceAccesses` | enabled | `enabled: false` |
-| `servicePresenceAccesses` | enabled | `enabled: false` |
-| `enhancedSummary` | enabled | `enabled: false` |
+| `servicePresenceStatusAccesses` | enabled | `enabled: false` |
+| `genComputingSummaryDefAccess` | enabled | `enabled: false` |
+
+`--path` (`-p`) points at a Salesforce metadata directory such as
+`force-app/main/default`. `--exclude` (`-e`, save only) takes comma-separated,
+case-insensitive **prefixes**: a matching entry is left exactly as it is in the
+source file instead of being normalized.
+
 ```bash
 # Diff all profiles — see what each profile is missing relative to others
 ./xml2l profile diff --path ./my-sfdx-project/main/default
@@ -74,7 +80,7 @@ The graph model is bipartite — one side is profiles, the other is permission t
 ./xml2l profile save --path ./my-sfdx-project/main/default --use-org-schema --org myOrg
 
 # Normalize profiles with org schema cross-check against specific org and exclude specific metadata
-./xml2l profile save --path ./my-sfdx-project/main/default --use-org-schema -org myOrg --exclude "chatter"
+./xml2l profile save --path ./my-sfdx-project/main/default --use-org-schema --org myOrg --exclude "chatter"
 ```
 
 ### Example output
@@ -100,14 +106,14 @@ When you run `profile save`, every profile gets:
 - **Backfilled entries** — if any profile references a piece of metadata, every profile gets an entry for it (with all booleans set to `false`)
 - **Layout assignments filtered and defaulted** — each profile keeps its own `layoutAssignments` entries (no backfilling from other profiles); entries are filtered to enforce Salesforce rules (at most one layout per object without a `recordType`, no duplicate `recordType` values); when a profile has no layout assignment for an object, a default is added from the first matching layout file on disk
 - **Sorted sections** — entries within each section are sorted alphabetically
-- **Preserved orphan sections** — `loginHours`, `loginIpRanges`, `profileActionOverrides` are extracted and re-inserted verbatim, even though the tool doesn't model them in the graph
-- **Org schema filtering (optional)** — when `--use-org-schema` (`-s`) is passed, entries are cross-checked against the Salesforce org via `sf org list metadata`; any entry whose metadata name does not exist in the org is skipped (overrides repository and graph checks); use `--org` (`-o`) to target a specific org alias
+- **Preserved unmodeled sections** — every top-level element the tool doesn't model (`loginHours`, `loginIpRanges`, `loginFlows`, `profileActionOverrides`, `fieldLevelSecurities`, and anything else) is extracted from the source and re-inserted verbatim, in document order
+- **Org schema filtering (optional)** — when `--use-org-schema` (`-s`) is passed, entries are cross-checked against the Salesforce org via `sf org list metadata`; any entry whose metadata name does not exist in the org is skipped (overrides repository and graph checks); use `--org` (`-o`) to target a specific org alias. A type whose query fails (transient error, unsupported type, missing permission) is **not** filtered — the tool only removes entries when the org explicitly reports that it has none
 
 The goal is deterministic output: run it twice, get identical files.
 
-## Graph exports - (in progess)
+## Graph exports - (in progress)
 
-Diff reports can optionally include a filesystem cross-reference (`--repo`), and the internal graph can be serialized to:
+Diff reports can include a filesystem cross-reference (`--repo`), and the internal graph can be serialized to:
 
 - **JSON** — Cytoscape.js-compatible format for web visualization
 - **DOT** — Graphviz format for rendering with `dot` or `neato`
