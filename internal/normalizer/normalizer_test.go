@@ -1150,10 +1150,7 @@ func TestNormalizeProfileRetrieveFidelity(t *testing.T) {
 	classes := make(map[string]bool)
 
 	for _, name := range profileNames {
-		raw, err := os.ReadFile(filepath.Join(fixtureDir, name+".retrieved.xml"))
-		if err != nil {
-			t.Fatalf("read fixture %s: %v", name, err)
-		}
+		raw := readFixture(t, filepath.Join(fixtureDir, name+".retrieved.xml"))
 
 		dst := filepath.Join(dir, "profiles", name+".profile-meta.xml")
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
@@ -1216,10 +1213,7 @@ func TestNormalizeProfileRetrieveFidelity(t *testing.T) {
 	}
 
 	for _, p := range g.Profiles() {
-		want, err := os.ReadFile(filepath.Join(fixtureDir, p.Name+".golden.xml"))
-		if err != nil {
-			t.Fatalf("read golden for %s: %v", p.Name, err)
-		}
+		want := readFixture(t, filepath.Join(fixtureDir, p.Name+".golden.xml"))
 
 		got := string(NormalizeProfile(p, g))
 		if got != string(want) {
@@ -1232,6 +1226,20 @@ func TestNormalizeProfileRetrieveFidelity(t *testing.T) {
 			}
 		}
 	}
+}
+
+// readFixture reads a fixture and normalises its line endings to LF. The
+// writer always emits LF, so the comparison must not depend on how the checkout
+// materialised the fixture (a Windows working tree is CRLF).
+func readFixture(t *testing.T, path string) []byte {
+	t.Helper()
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read fixture %s: %v", path, err)
+	}
+
+	return bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
 }
 
 // collectEntryNames records the field and Apex class names a profile references.
