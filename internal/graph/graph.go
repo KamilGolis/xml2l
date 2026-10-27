@@ -39,7 +39,11 @@ type ProfileNode struct {
 	Description  string // value of <description>
 	IsCustom     bool   // value of <custom>; false when tag absent
 	HasCustomTag bool   // true when <custom> tag was present (distinguish absent from false)
-	RawXML       string // original XML content for round-trip preservation
+	// Presence flags for elements whose empty value is still meaningful; an
+	// absent element and an empty one must render differently.
+	HasUserLicense bool
+	HasDescription bool
+	RawXML         string // original XML content for round-trip preservation
 	// Ghosts are entries the profile references whose metadata has no file in
 	// the project. They are dropped before the graph is built, so they carry no
 	// edges; the cross-reference report reads them from here.

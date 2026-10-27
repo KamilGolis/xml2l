@@ -165,7 +165,7 @@ func preservedBlocks(rawXML string) []profileBlock {
 func profileFieldBlocks(p *graph.ProfileNode) []profileBlock {
 	var blocks []profileBlock
 
-	if p.UserLicense != "" {
+	if p.HasUserLicense || p.UserLicense != "" {
 		blocks = append(blocks, profileBlock{"userLicense", "    <userLicense>" + xmlEscape(p.UserLicense) + "</userLicense>\n"})
 	}
 
@@ -178,7 +178,7 @@ func profileFieldBlocks(p *graph.ProfileNode) []profileBlock {
 		blocks = append(blocks, profileBlock{"custom", "    <custom>" + val + "</custom>\n"})
 	}
 
-	if p.Description != "" {
+	if p.HasDescription || p.Description != "" {
 		blocks = append(blocks, profileBlock{"description", "    <description>" + xmlEscape(p.Description) + "</description>\n"})
 	}
 

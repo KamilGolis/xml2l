@@ -58,6 +58,42 @@ func TestDecodeBasicProfile(t *testing.T) {
 	}
 }
 
+func TestDecodeEmptyProfileFieldsKeepPresence(t *testing.T) {
+	withEmpty := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <custom>false</custom>
+    <description></description>
+    <userLicense></userLicense>
+</Profile>`
+
+	prof, err := Decode(strings.NewReader(withEmpty), scanner.GroundTruth{})
+	if err != nil {
+		t.Fatalf("Decode failed: %v", err)
+	}
+
+	if !prof.HasDescription {
+		t.Error("expected HasDescription=true for an empty <description>")
+	}
+
+	if !prof.HasUserLicense {
+		t.Error("expected HasUserLicense=true for an empty <userLicense>")
+	}
+
+	without := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <custom>false</custom>
+</Profile>`
+
+	prof, err = Decode(strings.NewReader(without), scanner.GroundTruth{})
+	if err != nil {
+		t.Fatalf("Decode failed: %v", err)
+	}
+
+	if prof.HasDescription || prof.HasUserLicense {
+		t.Error("expected both presence flags to stay false when the elements are absent")
+	}
+}
+
 func TestDecodeGhostFiltering(t *testing.T) {
 	xml := `<?xml version="1.0" encoding="UTF-8"?>
 <Profile xmlns="http://soap.sforce.com/2006/04/metadata">

@@ -1375,6 +1375,45 @@ func TestProfileBlocksSortTopLevelElements(t *testing.T) {
 	}
 }
 
+func TestNormalizeProfilePreservesEmptyProfileFields(t *testing.T) {
+	dir := t.TempDir()
+	rawXML := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <custom>false</custom>
+    <description></description>
+    <userLicense></userLicense>
+</Profile>`
+
+	dst := filepath.Join(dir, "profiles", "Empty.profile-meta.xml")
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(dst, []byte(rawXML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := schema.LoadProfiles(dir)
+	if err != nil {
+		t.Fatalf("load project: %v", err)
+	}
+
+	profiles := g.Profiles()
+	if len(profiles) != 1 {
+		t.Fatalf("expected 1 profile, got %d", len(profiles))
+	}
+
+	got := string(NormalizeProfile(profiles[0], g))
+
+	if !strings.Contains(got, "<description></description>") {
+		t.Errorf("empty <description> was dropped:\n%s", got)
+	}
+
+	if !strings.Contains(got, "<userLicense></userLicense>") {
+		t.Errorf("empty <userLicense> was dropped:\n%s", got)
+	}
+}
+
 func TestNormalizeProfileViewAllFieldsPreservedNotBackfilled(t *testing.T) {
 	rawXML := `<?xml version="1.0" encoding="UTF-8"?>
 <Profile xmlns="http://soap.sforce.com/2006/04/metadata">
