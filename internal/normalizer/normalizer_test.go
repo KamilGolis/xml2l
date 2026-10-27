@@ -1089,7 +1089,14 @@ func TestWriteFileAtomic(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "X.profile-meta.xml")
 
-	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+	// 0640 rather than 0600: the temporary file writeFileAtomic creates is 0600,
+	// so a 0600 source would keep passing even if the mode were never preserved.
+	if err := os.WriteFile(path, []byte("old"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := os.Stat(path)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -1111,8 +1118,12 @@ func TestWriteFileAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if info.Mode().Perm() != 0o600 {
-		t.Errorf("mode = %v, want 0600 (preserved)", info.Mode().Perm())
+	// Compare against the mode the file actually had. Windows has no POSIX
+	// permission bits: Go maps only the owner-write bit to the read-only
+	// attribute, so 0640 is reported back as 0666 there and a literal 0600
+	// assertion can never hold.
+	if info.Mode().Perm() != before.Mode().Perm() {
+		t.Errorf("mode = %v, want %v (preserved)", info.Mode().Perm(), before.Mode().Perm())
 	}
 
 	entries, err := os.ReadDir(dir)
