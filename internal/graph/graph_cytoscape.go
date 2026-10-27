@@ -32,24 +32,25 @@ type CytoscapeEdge struct {
 
 // CytoscapeEdgeData holds the source, target, and permission properties for an edge.
 type CytoscapeEdgeData struct {
-	ID          string  `json:"id"`
-	Source      string  `json:"source"`
-	Target      string  `json:"target"`
-	MetaType    string  `json:"metaType,omitempty"`
-	Enabled     *bool   `json:"enabled,omitempty"`
-	Readable    *bool   `json:"readable,omitempty"`
-	Editable    *bool   `json:"editable,omitempty"`
-	AllowCreate *bool   `json:"allowCreate,omitempty"`
-	AllowDelete *bool   `json:"allowDelete,omitempty"`
-	AllowRead   *bool   `json:"allowRead,omitempty"`
-	AllowEdit   *bool   `json:"allowEdit,omitempty"`
-	ModifyAll   *bool   `json:"modifyAll,omitempty"`
-	ViewAll     *bool   `json:"viewAll,omitempty"`
-	Default     *bool   `json:"default,omitempty"`
-	Visible     *bool   `json:"visible,omitempty"`
-	Hidden      *bool   `json:"hidden,omitempty"`
-	Visibility  *string `json:"visibility,omitempty"`
-	RecordType  *string `json:"recordType,omitempty"`
+	ID            string  `json:"id"`
+	Source        string  `json:"source"`
+	Target        string  `json:"target"`
+	MetaType      string  `json:"metaType,omitempty"`
+	Enabled       *bool   `json:"enabled,omitempty"`
+	Readable      *bool   `json:"readable,omitempty"`
+	Editable      *bool   `json:"editable,omitempty"`
+	AllowCreate   *bool   `json:"allowCreate,omitempty"`
+	AllowDelete   *bool   `json:"allowDelete,omitempty"`
+	AllowRead     *bool   `json:"allowRead,omitempty"`
+	AllowEdit     *bool   `json:"allowEdit,omitempty"`
+	ModifyAll     *bool   `json:"modifyAll,omitempty"`
+	ViewAll       *bool   `json:"viewAll,omitempty"`
+	ViewAllFields *bool   `json:"viewAllFields,omitempty"`
+	Default       *bool   `json:"default,omitempty"`
+	Visible       *bool   `json:"visible,omitempty"`
+	Hidden        *bool   `json:"hidden,omitempty"`
+	Visibility    *string `json:"visibility,omitempty"`
+	RecordType    *string `json:"recordType,omitempty"`
 }
 
 // ToCytoscapeJSON serializes the graph to the Cytoscape.js elements format.
@@ -143,24 +144,25 @@ func (g *SalesforceGraph) ToCytoscapeJSON(maxPerType int) *CytoscapeGraph {
 
 		edge := CytoscapeEdge{
 			Data: CytoscapeEdgeData{
-				ID:          fmt.Sprintf("e%d", edgeIndex),
-				Source:      srcID,
-				Target:      tgtID,
-				MetaType:    string(e.MetadataNode.MetaType),
-				Enabled:     e.Properties.Enabled,
-				Readable:    e.Properties.Readable,
-				Editable:    e.Properties.Editable,
-				AllowCreate: e.Properties.AllowCreate,
-				AllowDelete: e.Properties.AllowDelete,
-				AllowRead:   e.Properties.AllowRead,
-				AllowEdit:   e.Properties.AllowEdit,
-				ModifyAll:   e.Properties.ModifyAll,
-				ViewAll:     e.Properties.ViewAll,
-				Default:     e.Properties.Default,
-				Visible:     e.Properties.Visible,
-				Hidden:      e.Properties.Hidden,
-				Visibility:  e.Properties.Visibility,
-				RecordType:  e.Properties.RecordType,
+				ID:            fmt.Sprintf("e%d", edgeIndex),
+				Source:        srcID,
+				Target:        tgtID,
+				MetaType:      string(e.MetadataNode.MetaType),
+				Enabled:       e.Properties.Enabled,
+				Readable:      e.Properties.Readable,
+				Editable:      e.Properties.Editable,
+				AllowCreate:   e.Properties.AllowCreate,
+				AllowDelete:   e.Properties.AllowDelete,
+				AllowRead:     e.Properties.AllowRead,
+				AllowEdit:     e.Properties.AllowEdit,
+				ModifyAll:     e.Properties.ModifyAll,
+				ViewAll:       e.Properties.ViewAll,
+				ViewAllFields: e.Properties.ViewAllFields,
+				Default:       e.Properties.Default,
+				Visible:       e.Properties.Visible,
+				Hidden:        e.Properties.Hidden,
+				Visibility:    e.Properties.Visibility,
+				RecordType:    e.Properties.RecordType,
 			},
 		}
 

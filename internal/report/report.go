@@ -293,6 +293,9 @@ func compareProps(a, b graph.EdgeProperties) []propDiff {
 	if diff := boolDiff("viewAllRecords", a.ViewAll, b.ViewAll); diff != nil {
 		diffs = append(diffs, *diff)
 	}
+	if diff := boolDiff("viewAllFields", a.ViewAllFields, b.ViewAllFields); diff != nil {
+		diffs = append(diffs, *diff)
+	}
 	if diff := boolDiff("default", a.Default, b.Default); diff != nil {
 		diffs = append(diffs, *diff)
 	}

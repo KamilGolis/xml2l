@@ -32,6 +32,7 @@ type objectPermEntry struct {
 	AllowEdit      *bool  `xml:"allowEdit"`
 	AllowModifyAll *bool  `xml:"modifyAllRecords"`
 	ViewAll        *bool  `xml:"viewAllRecords"`
+	ViewAllFields  *bool  `xml:"viewAllFields"`
 }
 
 type recordTypeEntry struct {
@@ -45,7 +46,7 @@ type tabVisibilityEntry struct {
 	Visibility string `xml:"visibility"`
 }
 
-func decodeAppVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry) error {
+func decodeAppVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, _ *[]string) error {
 	var entry appVisibilityEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {
@@ -61,7 +62,7 @@ func decodeAppVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanne
 	return nil
 }
 
-func decodeCategoryGroupVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry) error {
+func decodeCategoryGroupVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, _ *[]string) error {
 	var entry categoryGroupEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {
@@ -77,7 +78,7 @@ func decodeCategoryGroupVisibilities(decoder *xml.Decoder, se *xml.StartElement,
 	return nil
 }
 
-func decodeTabVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry) error {
+func decodeTabVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, _ *[]string) error {
 	var entry tabVisibilityEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {
@@ -95,7 +96,7 @@ func decodeTabVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanne
 	return nil
 }
 
-func decodeLayoutAssignments(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry) error {
+func decodeLayoutAssignments(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, _ *[]string) error {
 	var entry layoutEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {
@@ -111,7 +112,7 @@ func decodeLayoutAssignments(decoder *xml.Decoder, se *xml.StartElement, gt scan
 	return nil
 }
 
-func decodeObjectPermissions(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry) error {
+func decodeObjectPermissions(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, _ *[]string) error {
 	var entry objectPermEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {
@@ -125,13 +126,13 @@ func decodeObjectPermissions(decoder *xml.Decoder, se *xml.StartElement, gt scan
 	*entries = append(*entries, MetadataEntry{
 		Name: entry.Object, AllowCreate: entry.AllowCreate, AllowDelete: entry.AllowDelete,
 		AllowRead: entry.AllowRead, AllowEdit: entry.AllowEdit,
-		ModifyAll: entry.AllowModifyAll, ViewAll: entry.ViewAll,
+		ModifyAll: entry.AllowModifyAll, ViewAll: entry.ViewAll, ViewAllFields: entry.ViewAllFields,
 	})
 
 	return nil
 }
 
-func decodeRecordTypeVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry) error {
+func decodeRecordTypeVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, _ *[]string) error {
 	var entry recordTypeEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {

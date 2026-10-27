@@ -7,7 +7,7 @@ Spot differences between Salesforce profiles. Backfill missing entries. Understa
 `xml2l` decodes `.profile-meta.xml` files from an SFDX project, builds a complete graph of every profile-to-permission relationship, and lets you:
 
 - **Diff** profiles against each other — find out which Apex classes, objects, fields, tabs, or flows one profile has and another doesn't
-- **Normalize** profiles — backfill every permission entry the Master Schema knows about, sorted and consistent, so your files are deterministic
+- **Normalize** profiles — backfill every permission entry the Master Schema knows about, sorted and consistent, so a save diffs cleanly against a fresh retrieve
 - **Cross-reference** profile permissions against the filesystem — flag metadata referenced in profiles but missing from disk, and vice versa
 - **Export** the permission graph as JSON, Graphviz DOT, or Cytoscape.js — for visualization or pipeline consumption
 
@@ -27,7 +27,7 @@ The tool processes profiles through three phases:
 
 2. **Schema** (concurrent) — Read every `.profile-meta.xml` file in parallel. Aggregate every permission entry into a single Master Schema: the union of everything every profile knows about. Build a bipartite graph of `ProfileNode ↔ MetadataNode` edges with permission properties.
 
-3. **Normalize** (optional) — For each profile, backfill every entry from the Master Schema that the profile doesn't already have. Sort all sections alphabetically. Write consistent XML back to disk.
+3. **Normalize** (optional) — For each profile, backfill every entry from the Master Schema that the profile doesn't already have. Sort every top-level element and every permission property by tag name — the order Salesforce itself writes on retrieve — so a save leaves no formatting diff. Permission properties this build does not model are preserved verbatim and reported on stderr. Write consistent XML back to disk.
 
 The graph model is bipartite — one side is profiles, the other is permission targets (classes, fields, objects, tabs, flows, custom permissions, etc.). Edges carry the specific permission flags (`enabled`, `readable`, `editable`, `allowCreate`, `visible`, `hidden`, `visibility`, etc.).
 
@@ -39,7 +39,7 @@ The graph model is bipartite — one side is profiles, the other is permission t
 | `agentAccesses` | enabled | `enabled: false` |
 | `fieldPermissions` | readable, editable | `readable: false`, `editable: false` |
 | `fieldLevelSecurities` | hidden | preserved verbatim (not modeled or backfilled — `fieldPermissions` covers visibility) |
-| `objectPermissions` | allowRead, allowCreate, allowEdit, allowDelete, modifyAll, viewAll | all six `: false` |
+| `objectPermissions` | allowRead, allowCreate, allowEdit, allowDelete, modifyAll, viewAll, viewAllFields | the first six `: false`; `viewAllFields` is preserved but never backfilled (Salesforce omits it on orgs that do not support it) |
 | `layoutAssignments` | layout, recordType | not backfilled (Salesforce requires at most one layout per object without recordType) |
 | `tabVisibilities` | visibility | `visibility: "Hidden"` |
 | `recordTypeVisibilities` | visible, default, recordType | `visible: false`, `default: false` |
