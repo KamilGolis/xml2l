@@ -1375,13 +1375,13 @@ func TestProfileBlocksSortTopLevelElements(t *testing.T) {
 	}
 }
 
-func TestNormalizeProfilePreservesEmptyProfileFields(t *testing.T) {
+func TestNormalizeProfilePreservesEmptyDescription(t *testing.T) {
 	dir := t.TempDir()
 	rawXML := `<?xml version="1.0" encoding="UTF-8"?>
 <Profile xmlns="http://soap.sforce.com/2006/04/metadata">
     <custom>false</custom>
     <description></description>
-    <userLicense></userLicense>
+    <userLicense>Salesforce</userLicense>
 </Profile>`
 
 	dst := filepath.Join(dir, "profiles", "Empty.profile-meta.xml")
@@ -1409,8 +1409,8 @@ func TestNormalizeProfilePreservesEmptyProfileFields(t *testing.T) {
 		t.Errorf("empty <description> was dropped:\n%s", got)
 	}
 
-	if !strings.Contains(got, "<userLicense></userLicense>") {
-		t.Errorf("empty <userLicense> was dropped:\n%s", got)
+	if !strings.Contains(got, "<userLicense>Salesforce</userLicense>") {
+		t.Errorf("userLicense value was dropped:\n%s", got)
 	}
 }
 

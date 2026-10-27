@@ -58,12 +58,12 @@ func TestDecodeBasicProfile(t *testing.T) {
 	}
 }
 
-func TestDecodeEmptyProfileFieldsKeepPresence(t *testing.T) {
+func TestDecodeEmptyDescriptionKeepsPresence(t *testing.T) {
 	withEmpty := `<?xml version="1.0" encoding="UTF-8"?>
 <Profile xmlns="http://soap.sforce.com/2006/04/metadata">
     <custom>false</custom>
     <description></description>
-    <userLicense></userLicense>
+    <userLicense>Salesforce</userLicense>
 </Profile>`
 
 	prof, err := Decode(strings.NewReader(withEmpty), scanner.GroundTruth{})
@@ -75,13 +75,14 @@ func TestDecodeEmptyProfileFieldsKeepPresence(t *testing.T) {
 		t.Error("expected HasDescription=true for an empty <description>")
 	}
 
-	if !prof.HasUserLicense {
-		t.Error("expected HasUserLicense=true for an empty <userLicense>")
+	if prof.Description != "" {
+		t.Errorf("expected an empty Description, got %q", prof.Description)
 	}
 
 	without := `<?xml version="1.0" encoding="UTF-8"?>
 <Profile xmlns="http://soap.sforce.com/2006/04/metadata">
     <custom>false</custom>
+    <userLicense>Salesforce</userLicense>
 </Profile>`
 
 	prof, err = Decode(strings.NewReader(without), scanner.GroundTruth{})
@@ -89,8 +90,8 @@ func TestDecodeEmptyProfileFieldsKeepPresence(t *testing.T) {
 		t.Fatalf("Decode failed: %v", err)
 	}
 
-	if prof.HasDescription || prof.HasUserLicense {
-		t.Error("expected both presence flags to stay false when the elements are absent")
+	if prof.HasDescription {
+		t.Error("expected HasDescription=false when the element is absent")
 	}
 }
 

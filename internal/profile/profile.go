@@ -23,10 +23,8 @@ type Profile struct {
 	Description  string
 	IsCustom     bool
 	HasCustomTag bool
-	// HasUserLicense and HasDescription record that the element was present,
-	// including as an empty element: an empty value is still data the source
-	// carried, and dropping it changes the profile.
-	HasUserLicense bool
+	// HasDescription records that the element was present, including as an
+	// empty element: an empty description is still data the source carried.
 	HasDescription bool
 	Sections       map[string][]MetadataEntry
 	// Ghosts holds entry names per section that were dropped because their
@@ -178,8 +176,6 @@ func Decode(r io.Reader, gt scanner.GroundTruth) (*Profile, error) {
 				if err := decoder.DecodeElement(&prof.UserLicense, &t); err != nil {
 					return nil, fmt.Errorf("userLicense: %w", err)
 				}
-
-				prof.HasUserLicense = true
 			case "custom":
 				var val string
 
