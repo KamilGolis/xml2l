@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"xml2l/internal/graph"
 )
@@ -87,7 +88,7 @@ func DefaultEdgeProperties(mt graph.MetadataType) graph.EdgeProperties {
 // NormalizeProfile generates normalized XML for a single profile by backfilling
 // missing Master Schema entries, sorting every top-level element and every
 // permission property by tag name, and writing the result.
-func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) ([]byte, error) {
+func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph, unknown *unknownReport) ([]byte, error) {
 	if g.MasterSchema() == nil {
 		// No MasterSchema available — fall back to raw XML.
 		if p.RawXML != "" {
@@ -102,7 +103,7 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) ([]byte, error) {
 		return nil, err
 	}
 
-	blocks, err := profileBlocks(p, g, rawEntries)
+	blocks, err := profileBlocks(p, g, rawEntries, unknown)
 	if err != nil {
 		return nil, err
 	}
@@ -135,10 +136,10 @@ type profileBlock struct {
 // profileBlocks renders every top-level element the profile should contain:
 // profile-level values, modelled sections (with backfill), and sections the
 // normalizer does not model, preserved verbatim.
-func profileBlocks(p *graph.ProfileNode, g NormalizeGraph, rawEntries rawEntryIndex) ([]profileBlock, error) {
+func profileBlocks(p *graph.ProfileNode, g NormalizeGraph, rawEntries rawEntryIndex, unknown *unknownReport) ([]profileBlock, error) {
 	blocks := profileFieldBlocks(p)
 
-	blocks = append(blocks, sectionBlocks(p, g, rawEntries)...)
+	blocks = append(blocks, sectionBlocks(p, g, rawEntries, unknown)...)
 
 	preserved, err := preservedBlocks(p.RawXML)
 	if err != nil {
@@ -201,7 +202,7 @@ func profileFieldBlocks(p *graph.ProfileNode) []profileBlock {
 
 // sectionBlocks renders every permission entry of every modelled section,
 // backfilling entries the profile lacks and filtering per org schema.
-func sectionBlocks(p *graph.ProfileNode, g NormalizeGraph, rawEntries rawEntryIndex) []profileBlock {
+func sectionBlocks(p *graph.ProfileNode, g NormalizeGraph, rawEntries rawEntryIndex, unknown *unknownReport) []profileBlock {
 	// Pre-group edges by MetadataType so the per-section loop doesn't
 	// iterate all edges for every section type (O(sections × edges) → O(edges + sections)).
 	type nameAndProps struct {
@@ -350,7 +351,7 @@ func sectionBlocks(p *graph.ProfileNode, g NormalizeGraph, rawEntries rawEntryIn
 				continue
 			}
 
-			xmlBytes, err := renderEntry(sectionTag, e.name, e.props, rawEntries[sectionTag][e.name])
+			xmlBytes, err := renderEntry(sectionTag, e.name, e.props, rawEntries[sectionTag][e.name], unknown)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "warning: marshal %s/%s: %v\n", sectionTag, e.name, err)
 				continue
@@ -361,6 +362,74 @@ func sectionBlocks(p *graph.ProfileNode, g NormalizeGraph, rawEntries rawEntryIn
 	}
 
 	return blocks
+}
+
+// unknownReport counts permission properties preserved from the source that this
+// build does not model. A run reports each (section, tag) once, so one shared
+// property does not print a line per profile and entry.
+type unknownReport struct {
+	mu     sync.Mutex
+	counts map[unknownKey]int
+}
+
+type unknownKey struct {
+	section string
+	tag     string
+}
+
+func newUnknownReport() *unknownReport {
+	return &unknownReport{counts: make(map[unknownKey]int)}
+}
+
+// add records one preserved property. It is a no-op on a nil report, so callers
+// that only need the bytes can pass nil.
+func (r *unknownReport) add(section, tag string) {
+	if r == nil {
+		return
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.counts[unknownKey{section, tag}]++
+}
+
+// print writes one line per (section, tag) in a stable order.
+func (r *unknownReport) print(w io.Writer) {
+	if r == nil {
+		return
+	}
+
+	r.mu.Lock()
+
+	keys := make([]unknownKey, 0, len(r.counts))
+	for key := range r.counts {
+		keys = append(keys, key)
+	}
+
+	counts := make(map[unknownKey]int, len(r.counts))
+	for key, n := range r.counts {
+		counts[key] = n
+	}
+
+	r.mu.Unlock()
+
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].section != keys[j].section {
+			return keys[i].section < keys[j].section
+		}
+
+		return keys[i].tag < keys[j].tag
+	})
+
+	for _, key := range keys {
+		unit := "entries"
+		if counts[key] == 1 {
+			unit = "entry"
+		}
+
+		fmt.Fprintf(w, "warning: %s: preserving unknown element <%s> in %d %s\n", key.section, key.tag, counts[key], unit)
+	}
 }
 
 func xmlEscape(s string) string {
@@ -458,14 +527,14 @@ func entryChildren(sectionTag, name string, props graph.EdgeProperties) ([]entry
 
 // marshalEntry renders one entry from graph properties alone.
 func marshalEntry(sectionTag, name string, props graph.EdgeProperties) ([]byte, error) {
-	return renderEntry(sectionTag, name, props, "")
+	return renderEntry(sectionTag, name, props, "", nil)
 }
 
 // renderEntry renders one entry, merging the properties modelled in the graph
 // with any property this build does not model that the source entry carried.
 // Unknown properties are preserved verbatim and reported on stderr so they can
 // be modelled instead of silently lost.
-func renderEntry(sectionTag, name string, props graph.EdgeProperties, rawEntry string) ([]byte, error) {
+func renderEntry(sectionTag, name string, props graph.EdgeProperties, rawEntry string, unknown *unknownReport) ([]byte, error) {
 	children, err := entryChildren(sectionTag, name, props)
 	if err != nil {
 		return nil, err
@@ -483,7 +552,7 @@ func renderEntry(sectionTag, name string, props graph.EdgeProperties, rawEntry s
 					continue
 				}
 
-				fmt.Fprintf(os.Stderr, "warning: %s/%s: preserving unknown element <%s>\n", sectionTag, name, rc.tag)
+				unknown.add(sectionTag, rc.tag)
 
 				children = append(children, entryChild{tag: rc.tag, text: reindentTo(rc.body, 8)})
 			}
