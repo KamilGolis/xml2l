@@ -40,6 +40,16 @@ type ProfileNode struct {
 	IsCustom     bool   // value of <custom>; false when tag absent
 	HasCustomTag bool   // true when <custom> tag was present (distinguish absent from false)
 	RawXML       string // original XML content for round-trip preservation
+	// Ghosts are entries the profile references whose metadata has no file in
+	// the project. They are dropped before the graph is built, so they carry no
+	// edges; the cross-reference report reads them from here.
+	Ghosts []GhostEntry
+}
+
+// GhostEntry is metadata a profile references but the project does not contain.
+type GhostEntry struct {
+	MetaType MetadataType
+	Name     string
 }
 
 // MetadataNode represents a permission target that profiles reference.
@@ -51,20 +61,21 @@ type MetadataNode struct {
 // EdgeProperties holds the optional boolean permission flags on an edge.
 // A nil pointer means the flag was absent in the source XML (not specified).
 type EdgeProperties struct {
-	Enabled     *bool
-	Readable    *bool
-	Editable    *bool
-	AllowCreate *bool
-	AllowDelete *bool
-	AllowRead   *bool
-	AllowEdit   *bool
-	ModifyAll   *bool
-	ViewAll     *bool
-	Default     *bool
-	Visible     *bool
-	Hidden      *bool   // fieldLevelSecurities (API ≤22) hidden flag
-	Visibility  *string // categoryGroupVisibilities visibility ("Hidden"/"DefaultOff"/"DefaultOn")
-	RecordType  *string // layoutAssignment RecordType
+	Enabled       *bool
+	Readable      *bool
+	Editable      *bool
+	AllowCreate   *bool
+	AllowDelete   *bool
+	AllowRead     *bool
+	AllowEdit     *bool
+	ModifyAll     *bool
+	ViewAll       *bool
+	ViewAllFields *bool // objectPermissions viewAllFields; nil when the source omitted it (ADR-0003)
+	Default       *bool
+	Visible       *bool
+	Hidden        *bool   // fieldLevelSecurities (API ≤22) hidden flag
+	Visibility    *string // categoryGroupVisibilities visibility ("Hidden"/"DefaultOff"/"DefaultOn")
+	RecordType    *string // layoutAssignment RecordType
 }
 
 // Edge connects a ProfileNode to a MetadataNode with associated permission

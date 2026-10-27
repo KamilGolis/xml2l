@@ -96,6 +96,12 @@ func TestDecodeGhostFiltering(t *testing.T) {
 	if *entries[0].Readable != true || *entries[0].Editable != true {
 		t.Errorf("expected Readable=true Editable=true, got %+v", entries[0])
 	}
+
+	// The dropped entry is reported so the cross-reference can surface it.
+	ghosts := prof.Ghosts["fieldPermissions"]
+	if len(ghosts) != 1 || ghosts[0] != "Contact.GhostField__c" {
+		t.Errorf("expected Contact.GhostField__c as a ghost, got %v", ghosts)
+	}
 }
 
 func TestDecodeDedupViaGroundTruth(t *testing.T) {
@@ -343,5 +349,38 @@ func TestDecodeTabVisibilityStringEnums(t *testing.T) {
 		if entry.Visibility == nil || *entry.Visibility != expected {
 			t.Errorf("tab %q: expected Visibility=%q, got %+v", entry.Name, expected, entry.Visibility)
 		}
+	}
+}
+
+func TestDecodeViewAllFields(t *testing.T) {
+	xml := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <objectPermissions>
+        <allowCreate>false</allowCreate>
+        <object>Account</object>
+        <viewAllFields>true</viewAllFields>
+        <viewAllRecords>false</viewAllRecords>
+    </objectPermissions>
+    <objectPermissions>
+        <object>Contact</object>
+    </objectPermissions>
+</Profile>`
+
+	prof, err := Decode(strings.NewReader(xml), scanner.GroundTruth{})
+	if err != nil {
+		t.Fatalf("Decode failed: %v", err)
+	}
+
+	entries := prof.Sections["objectPermissions"]
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+
+	if entries[0].ViewAllFields == nil || !*entries[0].ViewAllFields {
+		t.Errorf("expected ViewAllFields=true for Account, got %v", entries[0].ViewAllFields)
+	}
+
+	if entries[1].ViewAllFields != nil {
+		t.Errorf("expected ViewAllFields to stay nil when the element is absent, got %v", *entries[1].ViewAllFields)
 	}
 }

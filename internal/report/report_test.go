@@ -589,3 +589,38 @@ func mkFile(t *testing.T, dir, path string) {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+func TestCrossReference_GhostReferences(t *testing.T) {
+	g := graph.NewGraph()
+	p, err := g.AddProfile("Admin", "")
+	if err != nil {
+		t.Fatalf("add profile: %v", err)
+	}
+
+	p.Ghosts = []graph.GhostEntry{
+		{MetaType: graph.MetaTypeField, Name: "Case.ClosedOnCreate"},
+		{MetaType: graph.MetaTypeField, Name: "Case.ClosedOnCreate"}, // duplicate from another profile section
+	}
+
+	other, err := g.AddProfile("Coupons", "")
+	if err != nil {
+		t.Fatalf("add profile: %v", err)
+	}
+
+	other.Ghosts = []graph.GhostEntry{{MetaType: graph.MetaTypeField, Name: "Case.IsVisibleInCss"}}
+
+	xr := CrossReference(g, map[string]map[string]bool{})
+
+	names := make(map[string]int)
+	for _, entry := range xr.MissingFiles {
+		names[entry.Name]++
+	}
+
+	if names["Case.ClosedOnCreate"] != 1 {
+		t.Errorf("expected Case.ClosedOnCreate once, got %d", names["Case.ClosedOnCreate"])
+	}
+
+	if names["Case.IsVisibleInCss"] != 1 {
+		t.Errorf("expected Case.IsVisibleInCss once, got %d", names["Case.IsVisibleInCss"])
+	}
+}

@@ -45,6 +45,37 @@ func CrossReference(g *graph.SalesforceGraph, repoFiles map[string]map[string]bo
 		}
 	}
 
+	// Ghost references never become nodes, so a profile-only reference to
+	// metadata with no file has to be read from the profiles themselves.
+	reported := make(map[string]bool, len(xr.MissingFiles))
+
+	for _, me := range xr.MissingFiles {
+		reported[me.MetaType+"\x00"+me.Name] = true
+	}
+
+	for _, p := range g.Profiles() {
+		for _, ghost := range p.Ghosts {
+			metaType := string(ghost.MetaType)
+
+			if metaTypeSkipList[metaType] {
+				continue
+			}
+
+			key := metaType + "\x00" + ghost.Name
+			if reported[key] {
+				continue
+			}
+
+			reported[key] = true
+
+			xr.MissingFiles = append(xr.MissingFiles, RepoEntry{
+				MetaType:     metaType,
+				Name:         ghost.Name,
+				ExpectedPath: expectedPath(metaType, ghost.Name),
+			})
+		}
+	}
+
 	// Direction 2: filesystem → graph — find files with no matching metadata node.
 	for metaType, entries := range repoFiles {
 		if metaTypeSkipList[metaType] {

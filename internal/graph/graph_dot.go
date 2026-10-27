@@ -97,6 +97,9 @@ func edgePropertiesLabel(props EdgeProperties) string {
 	if props.ViewAll != nil {
 		parts = append(parts, fmt.Sprintf("viewAllRecords: %t", *props.ViewAll))
 	}
+	if props.ViewAllFields != nil {
+		parts = append(parts, fmt.Sprintf("viewAllFields: %t", *props.ViewAllFields))
+	}
 	if props.Default != nil {
 		parts = append(parts, fmt.Sprintf("default: %t", *props.Default))
 	}

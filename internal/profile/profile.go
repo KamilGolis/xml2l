@@ -24,44 +24,50 @@ type Profile struct {
 	IsCustom     bool
 	HasCustomTag bool
 	Sections     map[string][]MetadataEntry
+	// Ghosts holds entry names per section that were dropped because their
+	// target has no file in the project. They never reach the graph, so a save
+	// cannot mention them; the cross-reference report surfaces them instead.
+	Ghosts map[string][]string
 }
 
 // MetadataEntry represents a single permission entry within a profile section.
 type MetadataEntry struct {
-	Name        string
-	Enabled     *bool
-	Readable    *bool
-	Editable    *bool
-	Visible     *bool
-	Hidden      *bool
-	Default     *bool
-	AllowCreate *bool
-	AllowDelete *bool
-	AllowRead   *bool
-	AllowEdit   *bool
-	ModifyAll   *bool
-	ViewAll     *bool
-	Visibility  *string
-	RecordType  *string
+	Name          string
+	Enabled       *bool
+	Readable      *bool
+	Editable      *bool
+	Visible       *bool
+	Hidden        *bool
+	Default       *bool
+	AllowCreate   *bool
+	AllowDelete   *bool
+	AllowRead     *bool
+	AllowEdit     *bool
+	ModifyAll     *bool
+	ViewAll       *bool
+	ViewAllFields *bool
+	Visibility    *string
+	RecordType    *string
 }
 
 // ToEdgeProperties converts this metadata entry to graph edge properties.
 func (e MetadataEntry) ToEdgeProperties() graph.EdgeProperties {
 	return graph.EdgeProperties{
-		Enabled:     e.Enabled,
-		Readable:    e.Readable,
-		Editable:    e.Editable,
-		Visible:     e.Visible,
-		Hidden:      e.Hidden,
-		Default:     e.Default,
-		AllowCreate: e.AllowCreate,
-		AllowDelete: e.AllowDelete,
-		AllowRead:   e.AllowRead,
-		AllowEdit:   e.AllowEdit,
-		ModifyAll:   e.ModifyAll,
-		ViewAll:     e.ViewAll,
-		Visibility:  e.Visibility,
-		RecordType:  e.RecordType,
+		Enabled:       e.Enabled,
+		Readable:      e.Readable,
+		Editable:      e.Editable,
+		Visible:       e.Visible,
+		Hidden:        e.Hidden,
+		Default:       e.Default,
+		AllowCreate:   e.AllowCreate,
+		AllowDelete:   e.AllowDelete,
+		AllowRead:     e.AllowRead,
+		AllowEdit:     e.AllowEdit,
+		ModifyAll:     e.ModifyAll,
+		ViewAll:       e.ViewAll,
+		ViewAllFields: e.ViewAllFields,
+		Visibility:    e.Visibility,
+		RecordType:    e.RecordType,
 	}
 }
 
@@ -71,7 +77,7 @@ func StrPtr(s string) *string { return &s }
 // sectionDecoder decodes ONE entry element of a known section type.
 // se is the entry's StartElement (e.g. <classAccesses>).
 // The decoder is positioned right after the StartElement.
-type sectionDecoder func(*xml.Decoder, *xml.StartElement, scanner.GroundTruth, *[]MetadataEntry) error
+type sectionDecoder func(*xml.Decoder, *xml.StartElement, scanner.GroundTruth, *[]MetadataEntry, *[]string) error
 
 var sectionFuncs = map[string]sectionDecoder{}
 
@@ -107,6 +113,7 @@ func init() {
 func Decode(r io.Reader, gt scanner.GroundTruth) (*Profile, error) {
 	prof := &Profile{
 		Sections: make(map[string][]MetadataEntry),
+		Ghosts:   make(map[string][]string),
 	}
 
 	decoder := xml.NewDecoder(r)
@@ -181,14 +188,21 @@ func Decode(r io.Reader, gt scanner.GroundTruth) (*Profile, error) {
 				}
 			default:
 				if fn, ok := sectionFuncs[tag]; ok {
-					var entries []MetadataEntry
+					var (
+						entries []MetadataEntry
+						ghosts  []string
+					)
 
-					if err := fn(decoder, &t, gt, &entries); err != nil {
+					if err := fn(decoder, &t, gt, &entries, &ghosts); err != nil {
 						return nil, fmt.Errorf("%s: %w", tag, err)
 					}
 
 					if len(entries) > 0 {
 						prof.Sections[tag] = append(prof.Sections[tag], entries...)
+					}
+
+					if len(ghosts) > 0 {
+						prof.Ghosts[tag] = append(prof.Ghosts[tag], ghosts...)
 					}
 				} else {
 					if err := skipElement(decoder); err != nil {
@@ -232,6 +246,6 @@ func skipElement(decoder *xml.Decoder) error {
 	}
 }
 
-func decodeRawEntry(decoder *xml.Decoder, _ *xml.StartElement, _ scanner.GroundTruth, _ *[]MetadataEntry) error {
+func decodeRawEntry(decoder *xml.Decoder, _ *xml.StartElement, _ scanner.GroundTruth, _ *[]MetadataEntry, _ *[]string) error {
 	return skipElement(decoder)
 }
