@@ -70,7 +70,7 @@ func FormatDiffText(r *DiffReport) string {
 
 	// Repo cross-reference section.
 	if r.CrossRef != nil {
-		if len(r.CrossRef.MissingFiles) > 0 || len(r.CrossRef.Unreferenced) > 0 {
+		if len(r.CrossRef.MissingFiles) > 0 || len(r.CrossRef.Ghosts) > 0 || len(r.CrossRef.Unreferenced) > 0 {
 			if len(r.ValueDifferences) > 0 || len(r.Profiles) > 0 {
 				fmt.Fprintln(&b)
 			}
@@ -85,8 +85,26 @@ func FormatDiffText(r *DiffReport) string {
 				}
 			}
 
-			if len(r.CrossRef.Unreferenced) > 0 {
+			if len(r.CrossRef.Ghosts) > 0 {
 				if len(r.CrossRef.MissingFiles) > 0 {
+					fmt.Fprintln(&b)
+				}
+
+				fmt.Fprintln(&b, "[Ghost References]")
+				fmt.Fprintln(&b, "  Profile entries dropped because their metadata has no file:")
+
+				for _, ghost := range r.CrossRef.Ghosts {
+					line := fmt.Sprintf("    %s: %s/%s", ghost.Profile, ghost.MetaType, ghost.Name)
+					if len(line) > 80 {
+						line = line[:77] + "..."
+					}
+
+					fmt.Fprintln(&b, line)
+				}
+			}
+
+			if len(r.CrossRef.Unreferenced) > 0 {
+				if len(r.CrossRef.MissingFiles) > 0 || len(r.CrossRef.Ghosts) > 0 {
 					fmt.Fprintln(&b)
 				}
 

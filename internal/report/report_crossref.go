@@ -53,12 +53,22 @@ func CrossReference(g *graph.SalesforceGraph, repoFiles map[string]map[string]bo
 		reported[me.MetaType+"\x00"+me.Name] = true
 	}
 
+	seenGhosts := make(map[GhostRef]bool)
+
 	for _, p := range g.Profiles() {
 		for _, ghost := range p.Ghosts {
 			metaType := string(ghost.MetaType)
 
 			if metaTypeSkipList[metaType] {
 				continue
+			}
+
+			// Attribution is per profile: a ghost is dropped from this
+			// profile's saved output, even when another profile drops it too.
+			ref := GhostRef{Profile: p.Name, MetaType: metaType, Name: ghost.Name}
+			if !seenGhosts[ref] {
+				seenGhosts[ref] = true
+				xr.Ghosts = append(xr.Ghosts, ref)
 			}
 
 			key := metaType + "\x00" + ghost.Name
@@ -99,6 +109,18 @@ func CrossReference(g *graph.SalesforceGraph, repoFiles map[string]map[string]bo
 		}
 
 		return xr.MissingFiles[i].Name < xr.MissingFiles[j].Name
+	})
+
+	sort.Slice(xr.Ghosts, func(i, j int) bool {
+		if xr.Ghosts[i].MetaType != xr.Ghosts[j].MetaType {
+			return xr.Ghosts[i].MetaType < xr.Ghosts[j].MetaType
+		}
+
+		if xr.Ghosts[i].Name != xr.Ghosts[j].Name {
+			return xr.Ghosts[i].Name < xr.Ghosts[j].Name
+		}
+
+		return xr.Ghosts[i].Profile < xr.Ghosts[j].Profile
 	})
 
 	sort.Slice(xr.Unreferenced, func(i, j int) bool {

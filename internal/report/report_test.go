@@ -1,6 +1,7 @@
 package report
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -555,6 +556,108 @@ func TestComputeDiff_WithRepoPath(t *testing.T) {
 }
 
 // Helpers.
+func TestCrossReference_GhostAttribution(t *testing.T) {
+	g := graph.NewGraph()
+
+	admin, err := g.AddProfile("Admin", "")
+	if err != nil {
+		t.Fatalf("add profile: %v", err)
+	}
+
+	admin.Ghosts = []graph.GhostEntry{{MetaType: graph.MetaTypeField, Name: "Case.ClosedOnCreate"}}
+
+	coupons, err := g.AddProfile("Coupons", "")
+	if err != nil {
+		t.Fatalf("add profile: %v", err)
+	}
+
+	coupons.Ghosts = []graph.GhostEntry{
+		{MetaType: graph.MetaTypeField, Name: "Case.ClosedOnCreate"},
+		{MetaType: graph.MetaTypeField, Name: "Case.ClosedOnCreate"}, // same entry listed twice
+	}
+
+	xr := CrossReference(g, map[string]map[string]bool{})
+
+	want := []GhostRef{
+		{Profile: "Admin", MetaType: "CustomField", Name: "Case.ClosedOnCreate"},
+		{Profile: "Coupons", MetaType: "CustomField", Name: "Case.ClosedOnCreate"},
+	}
+
+	if len(xr.Ghosts) != len(want) {
+		t.Fatalf("expected %d ghost references, got %d: %v", len(want), len(xr.Ghosts), xr.Ghosts)
+	}
+
+	for i := range want {
+		if xr.Ghosts[i] != want[i] {
+			t.Errorf("ghost reference %d: want %+v, got %+v", i, want[i], xr.Ghosts[i])
+		}
+	}
+
+	// The deduplicated missing-files list still carries the entry exactly once.
+	count := 0
+
+	for _, entry := range xr.MissingFiles {
+		if entry.MetaType == "CustomField" && entry.Name == "Case.ClosedOnCreate" {
+			count++
+		}
+	}
+
+	if count != 1 {
+		t.Errorf("expected one MissingFiles entry, got %d", count)
+	}
+}
+
+func TestFormatDiffText_GhostReferences(t *testing.T) {
+	r := &DiffReport{
+		CrossRef: &RepoCrossRef{
+			MissingFiles: []RepoEntry{{MetaType: "CustomField", Name: "Case.ClosedOnCreate"}},
+			Ghosts: []GhostRef{
+				{Profile: "Admin", MetaType: "CustomField", Name: "Case.ClosedOnCreate"},
+				{Profile: "Coupons", MetaType: "CustomField", Name: "Case.ClosedOnCreate"},
+			},
+		},
+	}
+
+	text := FormatDiffText(r)
+
+	if !strings.Contains(text, "[Ghost References]") {
+		t.Fatalf("expected a ghost section:\n%s", text)
+	}
+
+	for _, want := range []string{
+		"Admin: CustomField/Case.ClosedOnCreate",
+		"Coupons: CustomField/Case.ClosedOnCreate",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("expected %q in text:\n%s", want, text)
+		}
+	}
+
+	// The deduplicated list still renders the ghost once in [Missing Files].
+	if strings.Count(text, "    CustomField/Case.ClosedOnCreate\n") != 1 {
+		t.Errorf("expected one missing-files line:\n%s", text)
+	}
+}
+
+func TestDiffReportGhostsJSON(t *testing.T) {
+	r := &DiffReport{
+		CrossRef: &RepoCrossRef{
+			Ghosts: []GhostRef{{Profile: "Admin", MetaType: "CustomField", Name: "Case.ClosedOnCreate"}},
+		},
+	}
+
+	raw, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	for _, want := range []string{`"ghosts"`, `"profile":"Admin"`, `"metaType":"CustomField"`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("expected %s in JSON: %s", want, raw)
+		}
+	}
+}
+
 func findProfile(r *DiffReport, name string) *ProfileMissing {
 	for _, p := range r.Profiles {
 		if p.ProfileName == name {

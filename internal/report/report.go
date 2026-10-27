@@ -37,9 +37,19 @@ type RepoEntry struct {
 	ExpectedPath string `json:"expectedPath,omitempty"`
 }
 
+// GhostRef is metadata a profile references that the repository does not
+// contain. Unlike RepoEntry, it keeps the profile that carried the reference,
+// because a ghost is dropped from that profile's saved output.
+type GhostRef struct {
+	Profile  string `json:"profile"`
+	MetaType string `json:"metaType"`
+	Name     string `json:"name"`
+}
+
 // RepoCrossRef holds the results of cross-referencing profile metadata against the filesystem.
 type RepoCrossRef struct {
 	MissingFiles     []RepoEntry `json:"missingFiles"`
+	Ghosts           []GhostRef  `json:"ghosts,omitempty"`
 	Unreferenced     []RepoEntry `json:"unreferenced"`
 	SkippedTypesNote string      `json:"skippedTypesNote,omitempty"`
 }
