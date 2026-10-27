@@ -115,7 +115,16 @@ type SalesforceGraph struct {
 	availableLayouts []string
 	orgSchema        OrgSchemaProvider
 	excludePatterns  []string
+	decodeErrors     []error
 }
+
+// SetDecodeErrors records the profiles that could not be decoded while loading.
+// The graph still holds every profile that did decode, so callers can choose
+// between best-effort work (diff) and failing (save).
+func (g *SalesforceGraph) SetDecodeErrors(errs []error) { g.decodeErrors = errs }
+
+// DecodeErrors returns the profiles that could not be decoded while loading.
+func (g *SalesforceGraph) DecodeErrors() []error { return g.decodeErrors }
 
 // SectionMeta maps an XML section tag to its corresponding MetadataType.
 type SectionMeta struct {

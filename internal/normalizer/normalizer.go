@@ -87,17 +87,25 @@ func DefaultEdgeProperties(mt graph.MetadataType) graph.EdgeProperties {
 // NormalizeProfile generates normalized XML for a single profile by backfilling
 // missing Master Schema entries, sorting every top-level element and every
 // permission property by tag name, and writing the result.
-func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
+func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) ([]byte, error) {
 	if g.MasterSchema() == nil {
 		// No MasterSchema available — fall back to raw XML.
 		if p.RawXML != "" {
-			return []byte(p.RawXML)
+			return []byte(p.RawXML), nil
 		}
 
-		return nil
+		return nil, nil
 	}
 
-	blocks := profileBlocks(p, g, buildRawEntryIndex(p.RawXML))
+	rawEntries, err := buildRawEntryIndex(p.RawXML)
+	if err != nil {
+		return nil, err
+	}
+
+	blocks, err := profileBlocks(p, g, rawEntries)
+	if err != nil {
+		return nil, err
+	}
 
 	// Sort every top-level element by tag so output matches what Salesforce
 	// writes on retrieve (ADR-0002). The sort is stable, so entries inside a
@@ -114,7 +122,7 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 
 	buf.WriteString("</Profile>\n")
 
-	return buf.Bytes()
+	return buf.Bytes(), nil
 }
 
 // profileBlock is one rendered top-level <Profile> child, tagged with the
@@ -127,22 +135,28 @@ type profileBlock struct {
 // profileBlocks renders every top-level element the profile should contain:
 // profile-level values, modelled sections (with backfill), and sections the
 // normalizer does not model, preserved verbatim.
-func profileBlocks(p *graph.ProfileNode, g NormalizeGraph, rawEntries rawEntryIndex) []profileBlock {
+func profileBlocks(p *graph.ProfileNode, g NormalizeGraph, rawEntries rawEntryIndex) ([]profileBlock, error) {
 	blocks := profileFieldBlocks(p)
 
 	blocks = append(blocks, sectionBlocks(p, g, rawEntries)...)
-	blocks = append(blocks, preservedBlocks(p.RawXML)...)
 
-	return blocks
+	preserved, err := preservedBlocks(p.RawXML)
+	if err != nil {
+		return nil, err
+	}
+
+	blocks = append(blocks, preserved...)
+
+	return blocks, nil
 }
 
 // preservedBlocks returns the top-level elements the normalizer does not model,
 // re-indented and in document order, so a save never drops a section outside
 // the graph's scope.
-func preservedBlocks(rawXML string) []profileBlock {
+func preservedBlocks(rawXML string) ([]profileBlock, error) {
 	elems, err := scanDirectChildren(rawXML)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("scan profile sections: %w", err)
 	}
 
 	modeled := modeledTopLevelTags()
@@ -157,7 +171,7 @@ func preservedBlocks(rawXML string) []profileBlock {
 		blocks = append(blocks, profileBlock{el.tag, reindentTo(el.body, 4)})
 	}
 
-	return blocks
+	return blocks, nil
 }
 
 // profileFieldBlocks renders the profile-level values that live directly under
@@ -536,12 +550,12 @@ func matchesExclude(name string, patterns []string) bool {
 type rawEntryIndex map[string]map[string]string
 
 // buildRawEntryIndex indexes every entry of every section that has a name field.
-func buildRawEntryIndex(rawXML string) rawEntryIndex {
+func buildRawEntryIndex(rawXML string) (rawEntryIndex, error) {
 	idx := make(rawEntryIndex)
 
 	elems, err := scanDirectChildren(rawXML)
 	if err != nil {
-		return idx
+		return nil, err
 	}
 
 	for _, el := range elems {
@@ -566,7 +580,7 @@ func buildRawEntryIndex(rawXML string) rawEntryIndex {
 		}
 	}
 
-	return idx
+	return idx, nil
 }
 
 // modeledTopLevelTags returns the top-level <Profile> child tags the normalizer
