@@ -80,6 +80,10 @@ to a file.`,
 				return fmt.Errorf("required flag --path / -p is missing")
 			}
 
+			// Everything below touches the filesystem. A failure there is
+			// not a usage error, so stop repeating the flag list.
+			cmd.SilenceUsage = true
+
 			g, err := schema.LoadProfiles(projectPath)
 			if err != nil {
 				return err
@@ -192,6 +196,10 @@ func newSaveCmd() *cobra.Command {
 				g.SetExcludePatterns(excludePatterns)
 			}
 
+			// Everything below touches the filesystem. A failure there is
+			// not a usage error, so stop repeating the flag list.
+			cmd.SilenceUsage = true
+
 			if err := normalizer.WriteProfiles(g); err != nil {
 				return err
 			}
@@ -225,6 +233,10 @@ extension. The source XML files are not modified.`,
 			if projectPath == "" {
 				return fmt.Errorf("required flag --path / -p is missing")
 			}
+
+			// Everything below touches the filesystem. A failure there is
+			// not a usage error, so stop repeating the flag list.
+			cmd.SilenceUsage = true
 
 			return converter.ConvertProfiles(projectPath, profileFlag, profilesFlag)
 		},
@@ -266,6 +278,10 @@ extension. The source XML files are not modified.`,
 			if projectPath == "" {
 				return fmt.Errorf("required flag --path / -p is missing")
 			}
+
+			// Everything below touches the filesystem. A failure there is
+			// not a usage error, so stop repeating the flag list.
+			cmd.SilenceUsage = true
 
 			return converter.ConvertPermSets(projectPath, permsetFlag, permsetsFlag)
 		},
