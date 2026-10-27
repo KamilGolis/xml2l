@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1148,6 +1149,7 @@ func TestNormalizeProfileRetrieveFidelity(t *testing.T) {
 
 	fields := make(map[string]bool)
 	classes := make(map[string]bool)
+	retrieved := make(map[string]string)
 
 	for _, name := range profileNames {
 		raw := readFixture(t, filepath.Join(fixtureDir, name+".retrieved.xml"))
@@ -1162,6 +1164,7 @@ func TestNormalizeProfileRetrieveFidelity(t *testing.T) {
 		}
 
 		collectEntryNames(t, name, raw, fields, classes)
+		retrieved[name] = string(raw)
 	}
 
 	// Ghost references: the org profiles still list these two standard fields,
@@ -1225,7 +1228,203 @@ func TestNormalizeProfileRetrieveFidelity(t *testing.T) {
 				t.Errorf("%s: ghost reference %s must be dropped, not saved", p.Name, field)
 			}
 		}
+
+		assertRetrieveCompatible(t, p.Name, retrieved[p.Name], got, droppedFields)
 	}
+}
+
+// assertRetrieveCompatible checks the saved output against the retrieved file
+// itself: ADR-0002 claims a save keeps the retrieved structure, and comparing
+// with a golden alone cannot prove it, because the golden can be regenerated
+// from the same wrong renderer.
+func assertRetrieveCompatible(t *testing.T, profileName, retrieved, saved string, droppedFields map[string]bool) {
+	t.Helper()
+
+	want := shapeProfile(t, profileName+" retrieved", retrieved)
+	got := shapeProfile(t, profileName+" saved", saved)
+
+	if i, ok := firstUnsorted(got.tags); ok {
+		t.Errorf("%s: top-level elements are not alphabetical: %s before %s", profileName, got.tags[i-1], got.tags[i])
+	}
+
+	// The saved file may add entries and sections (backfill), but it must not
+	// reorder or drop the sections the source carried. Runs are collapsed
+	// because a section's entries are contiguous in both files.
+	wantSections := compressRuns(want.tags)
+	gotSections := compressRuns(got.tags)
+	next := 0
+
+	for _, tag := range gotSections {
+		if next < len(wantSections) && tag == wantSections[next] {
+			next++
+		}
+	}
+
+	if next != len(wantSections) {
+		t.Errorf("%s: saved sections %v do not retain the retrieved sections %v", profileName, gotSections, wantSections)
+	}
+
+	dropped := make(map[string]bool, len(droppedFields))
+
+	for field := range droppedFields {
+		dropped["fieldPermissions/"+field] = true
+	}
+
+	for key, wantChildren := range want.entries {
+		if dropped[key] {
+			continue
+		}
+
+		gotChildren, ok := got.entries[key]
+		if !ok {
+			t.Errorf("%s: entry %s disappeared", profileName, key)
+			continue
+		}
+
+		if !slices.Equal(gotChildren, wantChildren) {
+			t.Errorf("%s: entry %s has children %v, retrieved %v", profileName, key, gotChildren, wantChildren)
+		}
+	}
+
+	for key, children := range got.entries {
+		if i, ok := firstUnsorted(children); ok {
+			t.Errorf("%s: entry %s children are not alphabetical: %s before %s", profileName, key, children[i-1], children[i])
+		}
+	}
+}
+
+// firstUnsorted reports the first position whose tag sorts before its
+// predecessor.
+func firstUnsorted(tags []string) (int, bool) {
+	for i := 1; i < len(tags); i++ {
+		if tags[i-1] > tags[i] {
+			return i, true
+		}
+	}
+
+	return 0, false
+}
+
+// compressRuns turns ["a","a","b"] into ["a","b"].
+func compressRuns(tags []string) []string {
+	var out []string
+
+	for _, tag := range tags {
+		if len(out) == 0 || out[len(out)-1] != tag {
+			out = append(out, tag)
+		}
+	}
+
+	return out
+}
+
+// shapedProfile is the part of a profile the fidelity assertions compare: the
+// top-level element sequence and, for every named entry, its child sequence.
+type shapedProfile struct {
+	tags    []string
+	entries map[string][]string // "<section>/<entry name>" -> child tags
+}
+
+// shapeProfile reads a profile document into a shapedProfile. Entries are keyed
+// by section and name because saving reorders them.
+func shapeProfile(t *testing.T, label, doc string) shapedProfile {
+	t.Helper()
+
+	shape := shapedProfile{entries: make(map[string][]string)}
+	dec := xml.NewDecoder(strings.NewReader(doc))
+
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			t.Fatalf("%s: no <Profile> root", label)
+		}
+		if err != nil {
+			t.Fatalf("%s: parse root: %v", label, err)
+		}
+		if se, ok := tok.(xml.StartElement); ok && se.Name.Local == "Profile" {
+			break
+		}
+	}
+
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			return shape
+		}
+		if err != nil {
+			t.Fatalf("%s: parse: %v", label, err)
+		}
+
+		switch t2 := tok.(type) {
+		case xml.StartElement:
+			tag := t2.Name.Local
+			shape.tags = append(shape.tags, tag)
+
+			nameField, ok := sectionNameField[tag]
+			if !ok {
+				if err := dec.Skip(); err != nil {
+					t.Fatalf("%s/%s: skip: %v", label, tag, err)
+				}
+
+				continue
+			}
+
+			name, children := shapeEntry(t, label, tag, nameField, t2, dec)
+			shape.entries[tag+"/"+name] = children
+		case xml.EndElement:
+			return shape
+		}
+	}
+}
+
+// shapeEntry returns an entry's name and the tags of its children, in order.
+func shapeEntry(t *testing.T, label, section, nameField string, se xml.StartElement, dec *xml.Decoder) (string, []string) {
+	t.Helper()
+
+	var entry struct {
+		Inner []byte `xml:",innerxml"`
+	}
+	if err := dec.DecodeElement(&entry, &se); err != nil {
+		t.Fatalf("%s/%s: decode entry: %v", label, section, err)
+	}
+
+	var (
+		name     string
+		children []string
+	)
+
+	inner := xml.NewDecoder(bytes.NewReader(entry.Inner))
+
+	for {
+		tok, err := inner.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("%s/%s: parse entry: %v", label, section, err)
+		}
+
+		child, ok := tok.(xml.StartElement)
+		if !ok {
+			continue
+		}
+
+		children = append(children, child.Name.Local)
+
+		if child.Name.Local == nameField {
+			if err := inner.DecodeElement(&name, &child); err != nil {
+				t.Fatalf("%s/%s: decode %s: %v", label, section, nameField, err)
+			}
+
+			continue
+		}
+
+		if err := inner.Skip(); err != nil {
+			t.Fatalf("%s/%s: skip %s: %v", label, section, child.Name.Local, err)
+		}
+	}
+
+	return name, children
 }
 
 // readFixture reads a fixture and normalises its line endings to LF. The
