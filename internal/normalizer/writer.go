@@ -23,6 +23,7 @@ func WriteProfiles(g NormalizeGraph) error {
 		maxWorkers = 1
 	}
 	sem := make(chan struct{}, maxWorkers)
+	unknown := newUnknownReport()
 
 	var wg sync.WaitGroup
 	errs := make(chan error, len(profiles))
@@ -38,7 +39,7 @@ func WriteProfiles(g NormalizeGraph) error {
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			xmlBytes, err := NormalizeProfile(profile, g)
+			xmlBytes, err := NormalizeProfile(profile, g, unknown)
 			if err != nil {
 				errs <- fmt.Errorf("Normalize %s: %w", profile.SourcePath, err)
 				return
@@ -59,6 +60,8 @@ func WriteProfiles(g NormalizeGraph) error {
 
 	wg.Wait()
 	close(errs)
+
+	unknown.print(os.Stderr)
 
 	// Collect errors (report first error).
 	var firstErr error

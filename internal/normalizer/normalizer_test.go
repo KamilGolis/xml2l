@@ -511,7 +511,7 @@ func TestNormalizeProfileRejectsUnparseableRawXML(t *testing.T) {
 
 	p.RawXML = `<Profile xmlns="http://soap.sforce.com/2006/04/metadata"><loginIpRanges>`
 
-	if _, err := NormalizeProfile(p, g); err == nil {
+	if _, err := NormalizeProfile(p, g, nil); err == nil {
 		t.Fatal("expected an error instead of a profile without its unmodelled sections")
 	}
 }
@@ -1112,7 +1112,7 @@ func TestNormalizeProfileOrgSchemaUnqueriedTypeKeepsEntries(t *testing.T) {
 func mustNormalize(t *testing.T, p *graph.ProfileNode, g NormalizeGraph) []byte {
 	t.Helper()
 
-	out, err := NormalizeProfile(p, g)
+	out, err := NormalizeProfile(p, g, nil)
 	if err != nil {
 		t.Fatalf("normalize %s: %v", p.Name, err)
 	}
@@ -1597,6 +1597,74 @@ func TestRenderEntrySortsChildrenAlphabetically(t *testing.T) {
 	}
 }
 
+func TestUnknownReportDeduplicates(t *testing.T) {
+	report := newUnknownReport()
+	report.add("userPermissions", "futureFlag")
+	report.add("userPermissions", "futureFlag")
+	report.add("userPermissions", "futureFlag")
+	report.add("objectPermissions", "futurePermission")
+
+	var out bytes.Buffer
+
+	report.print(&out)
+
+	want := "warning: objectPermissions: preserving unknown element <futurePermission> in 1 entry\n" +
+		"warning: userPermissions: preserving unknown element <futureFlag> in 3 entries\n"
+
+	if out.String() != want {
+		t.Errorf("report = %q, want %q", out.String(), want)
+	}
+}
+
+func TestNormalizeProfileCountsUnknownChildrenOnce(t *testing.T) {
+	rawXML := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <userPermissions>
+        <enabled>true</enabled>
+        <futureFlag>true</futureFlag>
+        <name>First</name>
+    </userPermissions>
+    <userPermissions>
+        <enabled>true</enabled>
+        <futureFlag>true</futureFlag>
+        <name>Second</name>
+    </userPermissions>
+</Profile>`
+
+	g := graph.NewGraph()
+	ms := schema.NewMasterSchema()
+	ms.Add("userPermissions", "First")
+	ms.Add("userPermissions", "Second")
+	g.SetMasterSchema(ms)
+
+	p, err := g.AddProfile("Admin", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p.RawXML = rawXML
+
+	for _, name := range []string{"First", "Second"} {
+		mn := g.GetOrCreateMetadataNode(graph.MetaTypeUserPerm, name)
+		g.AddEdge(p, mn, graph.EdgeProperties{Enabled: boolPtr(true)})
+	}
+
+	report := newUnknownReport()
+	if _, err := NormalizeProfile(p, g, report); err != nil {
+		t.Fatalf("NormalizeProfile: %v", err)
+	}
+
+	var out bytes.Buffer
+
+	report.print(&out)
+
+	want := "warning: userPermissions: preserving unknown element <futureFlag> in 2 entries\n"
+
+	if out.String() != want {
+		t.Errorf("report = %q, want %q", out.String(), want)
+	}
+}
+
 func TestRenderEntryPreservesUnknownChild(t *testing.T) {
 	raw := `<objectPermissions>
         <allowCreate>true</allowCreate>
@@ -1608,7 +1676,7 @@ func TestRenderEntryPreservesUnknownChild(t *testing.T) {
 	out, err := renderEntry("objectPermissions", "Account", graph.EdgeProperties{
 		AllowCreate: boolPtr(true),
 		ViewAll:     boolPtr(false),
-	}, raw)
+	}, raw, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
