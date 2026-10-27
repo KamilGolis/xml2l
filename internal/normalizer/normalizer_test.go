@@ -1137,6 +1137,59 @@ func TestWriteFileAtomic(t *testing.T) {
 	}
 }
 
+func TestWriteFileAtomicReadOnlyTarget(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "X.profile-meta.xml")
+
+	if err := os.WriteFile(path, []byte("old"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chmod(path, 0o444); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if before.Mode().Perm()&0o200 != 0 {
+		t.Skipf("filesystem does not honour a read-only mode: %v", before.Mode().Perm())
+	}
+
+	if err := writeFileAtomic(path, []byte("new")); err != nil {
+		t.Fatalf("writeFileAtomic on a read-only file: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(got) != "new" {
+		t.Errorf("content = %q, want %q", got, "new")
+	}
+
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if after.Mode().Perm() != before.Mode().Perm() {
+		t.Errorf("mode = %v, want %v (read-only preserved)", after.Mode().Perm(), before.Mode().Perm())
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(entries) != 1 {
+		t.Errorf("expected only the target file, got %d entries (temp file left behind?)", len(entries))
+	}
+}
+
 // TestNormalizeProfileRetrieveFidelity pins the saved shape against two real
 // profiles retrieved from an org. The saved output may differ from the retrieved
 // files only by backfilled entries and by ghost references dropped for having no
