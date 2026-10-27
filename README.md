@@ -40,12 +40,13 @@ The graph model is bipartite — one side is profiles, the other is permission t
 | `fieldPermissions` | readable, editable | `readable: false`, `editable: false` |
 | `fieldLevelSecurities` | hidden | preserved verbatim (not modeled or backfilled — `fieldPermissions` covers visibility) |
 | `objectPermissions` | allowRead, allowCreate, allowEdit, allowDelete, modifyAll, viewAll, viewAllFields | the first six `: false`; `viewAllFields` is preserved but never backfilled (Salesforce omits it on orgs that do not support it) |
+| `pageAccesses` | enabled | `enabled: false` |
 | `layoutAssignments` | layout, recordType | not backfilled (Salesforce requires at most one layout per object without recordType) |
 | `tabVisibilities` | visibility | `visibility: "Hidden"` |
 | `recordTypeVisibilities` | visible, default, recordType | `visible: false`, `default: false` |
 | `userPermissions` | enabled | `enabled: false` |
 | `flowAccesses` | enabled | `enabled: false` |
-| `appVisibilities` | visible, default | `visible: false`, `default: false` |
+| `applicationVisibilities` | visible, default | `visible: false`, `default: false` |
 | `customPermissions` | enabled | `enabled: false` |
 | `customMetadataTypeAccesses` | enabled | `enabled: false` |
 | `customSettingAccesses` | enabled | `enabled: false` |
@@ -57,8 +58,10 @@ The graph model is bipartite — one side is profiles, the other is permission t
 
 `--path` (`-p`) points at a Salesforce metadata directory such as
 `force-app/main/default`. `--exclude` (`-e`, save only) takes comma-separated,
-case-insensitive **prefixes**: a matching entry is left exactly as it is in the
-source file instead of being normalized.
+case-insensitive **prefixes**: a matching entry is copied from the source
+instead of being normalized, so it keeps the property order of the file (only
+its indentation is normalized). Every other entry in that profile is still
+sorted.
 
 ```bash
 # Diff all profiles — see what each profile is missing relative to others
