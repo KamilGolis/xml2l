@@ -89,6 +89,10 @@ to a file.`,
 				return err
 			}
 
+			for _, decodeErr := range g.DecodeErrors() {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %v\n", decodeErr)
+			}
+
 			if len(g.ProfileNodes) < 2 {
 				return fmt.Errorf("diff requires at least 2 profiles, found %d", len(g.ProfileNodes))
 			}
@@ -202,6 +206,13 @@ func newSaveCmd() *cobra.Command {
 
 			if err := normalizer.WriteProfiles(g); err != nil {
 				return err
+			}
+
+			// A profile that failed to decode was skipped by the loader and
+			// left untouched. Saving the rest is still useful, but the run must
+			// not report success.
+			if decodeErrs := g.DecodeErrors(); len(decodeErrs) > 0 {
+				return fmt.Errorf("%d profile(s) could not be decoded and were left untouched: %w", len(decodeErrs), decodeErrs[0])
 			}
 
 			fmt.Fprintf(os.Stderr, "Done. Profiles saved.\n")

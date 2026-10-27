@@ -94,11 +94,7 @@ func LoadProfiles(projectPath string) (*graph.SalesforceGraph, error) {
 		}
 	}
 
-	if len(decodeErrs) > 0 {
-		for _, e := range decodeErrs {
-			fmt.Fprintf(os.Stderr, "warning: %v\n", e)
-		}
-	}
+	g.SetDecodeErrors(decodeErrs)
 
 	return g, nil
 }

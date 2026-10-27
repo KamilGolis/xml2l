@@ -164,7 +164,7 @@ func TestNormalizeProfileBackfill(t *testing.T) {
 	g.AddEdge(p, fieldNode, graph.EdgeProperties{Readable: boolPtr(true), Editable: boolPtr(true)})
 	g.AddEdge(p, classNode, graph.EdgeProperties{Enabled: boolPtr(true)})
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	// Should contain existing entry with correct permissions.
@@ -205,7 +205,7 @@ func TestNormalizeProfileLayoutNoBackfill(t *testing.T) {
 	layoutNode := g.GetOrCreateMetadataNode(graph.MetaTypeLayout, "Account-Account Layout")
 	g.AddEdge(p, layoutNode, graph.EdgeProperties{})
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	// Existing layout must be present.
@@ -238,7 +238,7 @@ func TestNormalizeProfileLayoutSortByRecordType(t *testing.T) {
 	emptyRT := ""
 	g.AddEdge(p, layoutNode, graph.EdgeProperties{RecordType: &emptyRT})
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	// Entries should appear in order: no recordType, then RT1, then RT2.
@@ -271,7 +271,7 @@ func TestNormalizeProfileLayoutDefaultFromDisk(t *testing.T) {
 	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
 
 	// Profile has NO layout assignments at all.
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	if !strings.Contains(output, "Account-Account Layout") {
@@ -302,7 +302,7 @@ func TestNormalizeProfileLayoutNoDefaultWhenEntriesExist(t *testing.T) {
 	node := g.GetOrCreateMetadataNode(graph.MetaTypeLayout, "Account-Custom Layout")
 	g.AddEdge(p, node, graph.EdgeProperties{RecordType: &rt})
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	if !strings.Contains(output, "Account-Custom Layout") {
@@ -345,7 +345,7 @@ func TestNormalizeProfileLayoutFiltersMultipleNoRecordType(t *testing.T) {
 		g.AddEdge(p, node, graph.EdgeProperties{RecordType: rtPtr})
 	}
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	if !strings.Contains(output, "Account-Account Layout") {
@@ -381,7 +381,7 @@ func TestNormalizeProfileLayoutDedupRecordTypes(t *testing.T) {
 	g.AddEdge(p, node1, graph.EdgeProperties{RecordType: &rt})
 	g.AddEdge(p, node2, graph.EdgeProperties{RecordType: &rt})
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	if !strings.Contains(output, "Account-Alpha Layout") {
@@ -404,7 +404,7 @@ func TestNormalizeProfileXMLHeader(t *testing.T) {
 	p, _ := g.AddProfile("Admin", "test.profile-meta.xml")
 	p.UserLicense = "Salesforce"
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	if !strings.HasPrefix(output, `<?xml version="1.0" encoding="UTF-8"?>`) {
@@ -446,7 +446,10 @@ func TestPreservedBlocks(t *testing.T) {
     </profileActionOverrides>
 </Profile>`
 
-	blocks := preservedBlocks(rawXML)
+	blocks, err := preservedBlocks(rawXML)
+	if err != nil {
+		t.Fatalf("preservedBlocks: %v", err)
+	}
 
 	byTag := make(map[string]int)
 
@@ -483,17 +486,33 @@ func TestPreservedBlocks(t *testing.T) {
 }
 
 func TestPreservedBlocksEmpty(t *testing.T) {
-	if got := preservedBlocks(""); len(got) != 0 {
-		t.Errorf("expected none, got %v", got)
+	if got, err := preservedBlocks(""); err != nil || len(got) != 0 {
+		t.Errorf("expected none, got %v (err %v)", got, err)
 	}
 
-	if got := preservedBlocks("<Profile/>"); len(got) != 0 {
-		t.Errorf("expected none for Profile-only, got %v", got)
+	if got, err := preservedBlocks("<Profile/>"); err != nil || len(got) != 0 {
+		t.Errorf("expected none for Profile-only, got %v (err %v)", got, err)
 	}
 
-	// Malformed input must not panic and must yield no preservation.
-	if got := preservedBlocks("<Profile><oops>"); len(got) != 0 {
-		t.Errorf("expected none for malformed XML, got %v", got)
+	// Malformed input must be reported, not silently dropped.
+	if _, err := preservedBlocks("<Profile><oops>"); err == nil {
+		t.Error("expected an error for malformed XML")
+	}
+}
+
+func TestNormalizeProfileRejectsUnparseableRawXML(t *testing.T) {
+	g := graph.NewGraph()
+	g.SetMasterSchema(schema.NewMasterSchema())
+
+	p, err := g.AddProfile("Broken", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p.RawXML = `<Profile xmlns="http://soap.sforce.com/2006/04/metadata"><loginIpRanges>`
+
+	if _, err := NormalizeProfile(p, g); err == nil {
+		t.Fatal("expected an error instead of a profile without its unmodelled sections")
 	}
 }
 
@@ -515,7 +534,7 @@ func TestNormalizeProfilePreservesLoginHours(t *testing.T) {
 	p.RawXML = rawXML
 	p.UserLicense = "Salesforce"
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	if !strings.Contains(output, "loginHours") {
@@ -545,7 +564,7 @@ func TestNormalizeProfilePreservesLoginFlows(t *testing.T) {
 	p.RawXML = rawXML
 	p.UserLicense = "Salesforce"
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	if !strings.Contains(output, "loginFlows") {
@@ -592,7 +611,7 @@ func TestNormalizeProfileValidXML(t *testing.T) {
 	p, _ := g.AddProfile("Admin", "test.profile-meta.xml")
 	p.UserLicense = "Salesforce"
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 
 	// Parse back to verify it's well-formed XML.
 	decoder := xml.NewDecoder(bytes.NewReader(xmlBytes))
@@ -622,7 +641,7 @@ func TestNormalizeProfileTabVisBackfillNoEmptyTag(t *testing.T) {
 	g.SetMasterSchema(ms)
 	p, _ := g.AddProfile("Admin", "test.profile-meta.xml")
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	// Tab vis entry should be present.
@@ -650,7 +669,7 @@ func TestNormalizeProfileAlphabeticalSort(t *testing.T) {
 	g.SetMasterSchema(ms)
 	p, _ := g.AddProfile("Admin", "test.profile-meta.xml")
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 
 	// Check that fields appear in alphabetical order.
 	aPos := bytes.Index(xmlBytes, []byte("AField"))
@@ -718,7 +737,7 @@ func TestNormalizeProfileOrgSchemaFiltersApexClass(t *testing.T) {
 	nodeA := g.GetOrCreateMetadataNode(graph.MetaTypeApexClass, "ClassA")
 	g.AddEdge(p, nodeA, graph.EdgeProperties{Enabled: boolPtr(true)})
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	if !strings.Contains(output, "ClassA") {
@@ -751,7 +770,7 @@ func TestNormalizeProfileOrgSchemaFiltersLayouts(t *testing.T) {
 
 	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	if !strings.Contains(output, "Account-Account Layout") {
@@ -817,7 +836,10 @@ func TestBuildRawEntryIndex(t *testing.T) {
     </fieldPermissions>
 </Profile>`
 
-	idx := buildRawEntryIndex(raw)
+	idx, err := buildRawEntryIndex(raw)
+	if err != nil {
+		t.Fatalf("buildRawEntryIndex: %v", err)
+	}
 
 	if got := idx["userPermissions"]["ChatterInternal"]; !strings.Contains(got, "<enabled>true</enabled>") {
 		t.Errorf("expected ChatterInternal entry, got %q", got)
@@ -872,7 +894,7 @@ func TestNormalizeProfileExcludePreservesOriginal(t *testing.T) {
 	node2 := g.GetOrCreateMetadataNode(graph.MetaTypeUserPerm, "StandardUserPerm")
 	g.AddEdge(p, node2, graph.EdgeProperties{Enabled: boolPtr(true)})
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	// ChatterInternal should be preserved from raw XML (enabled=false),
@@ -911,7 +933,7 @@ func TestNormalizeProfileExcludeDropsBackfilled(t *testing.T) {
 	node := g.GetOrCreateMetadataNode(graph.MetaTypeUserPerm, "ChatterInternal")
 	g.AddEdge(p, node, graph.EdgeProperties{Enabled: boolPtr(true)})
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	// ChatterInternal (in raw XML) should be preserved.
@@ -965,7 +987,7 @@ func TestNormalizeProfileExcludeOrdering(t *testing.T) {
 		g.AddEdge(p, node, graph.EdgeProperties{Enabled: boolPtr(true)})
 	}
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	// All entries should be in alphabetical order: A_Normal, B_Normal, X_Excluded, Y_Excluded.
@@ -1013,7 +1035,7 @@ func TestNormalizeProfileExcludeNoEffectWhenOmitted(t *testing.T) {
 		g.AddEdge(p, node, graph.EdgeProperties{Enabled: boolPtr(true)})
 	}
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	// Both entries should be marshaled (enabled=true from graph), not preserved from raw XML.
@@ -1046,7 +1068,7 @@ func TestNormalizeProfilePreservesUnmodeledSections(t *testing.T) {
 	p.RawXML = rawXML
 	p.UserLicense = "Salesforce"
 
-	out := string(NormalizeProfile(p, g))
+	out := string(mustNormalize(t, p, g))
 
 	for _, tag := range []string{"fieldLevelSecurities", "loginHours"} {
 		if !strings.Contains(out, tag) {
@@ -1079,11 +1101,23 @@ func TestNormalizeProfileOrgSchemaUnqueriedTypeKeepsEntries(t *testing.T) {
 	node := g.GetOrCreateMetadataNode(graph.MetaTypeApexClass, "ClassA")
 	g.AddEdge(p, node, graph.EdgeProperties{Enabled: boolPtr(true)})
 
-	out := string(NormalizeProfile(p, g))
+	out := string(mustNormalize(t, p, g))
 
 	if !strings.Contains(out, "ClassA") {
 		t.Error("entries of an unqueried type must not be filtered out")
 	}
+}
+
+// mustNormalize renders a profile and fails the test on a parse error.
+func mustNormalize(t *testing.T, p *graph.ProfileNode, g NormalizeGraph) []byte {
+	t.Helper()
+
+	out, err := NormalizeProfile(p, g)
+	if err != nil {
+		t.Fatalf("normalize %s: %v", p.Name, err)
+	}
+
+	return out
 }
 
 func TestWriteFileAtomic(t *testing.T) {
@@ -1271,7 +1305,7 @@ func TestNormalizeProfileRetrieveFidelity(t *testing.T) {
 	for _, p := range g.Profiles() {
 		want := readFixture(t, filepath.Join(fixtureDir, p.Name+".golden.xml"))
 
-		got := string(NormalizeProfile(p, g))
+		got := string(mustNormalize(t, p, g))
 		if got != string(want) {
 			t.Errorf("%s: saved output differs from golden at %s", p.Name, firstDifference(string(want), got))
 		}
@@ -1619,7 +1653,7 @@ func TestProfileBlocksSortTopLevelElements(t *testing.T) {
 	classNode := g.GetOrCreateMetadataNode(graph.MetaTypeApexClass, "MyClass")
 	g.AddEdge(p, classNode, graph.EdgeProperties{Enabled: boolPtr(true)})
 
-	out := string(NormalizeProfile(p, g))
+	out := string(mustNormalize(t, p, g))
 	got := strings.Join(childTags(t, out), ",")
 
 	if got != "classAccesses,custom,description,loginIpRanges,userLicense" {
@@ -1655,7 +1689,7 @@ func TestNormalizeProfilePreservesEmptyDescription(t *testing.T) {
 		t.Fatalf("expected 1 profile, got %d", len(profiles))
 	}
 
-	got := string(NormalizeProfile(profiles[0], g))
+	got := string(mustNormalize(t, profiles[0], g))
 
 	if !strings.Contains(got, "<description></description>") {
 		t.Errorf("empty <description> was dropped:\n%s", got)
@@ -1690,7 +1724,7 @@ func TestNormalizeProfileViewAllFieldsPreservedNotBackfilled(t *testing.T) {
 	account := g.GetOrCreateMetadataNode(graph.MetaTypeObject, "Account")
 	g.AddEdge(p, account, graph.EdgeProperties{AllowCreate: boolPtr(false), ViewAll: boolPtr(false), ViewAllFields: boolPtr(true)})
 
-	out := string(NormalizeProfile(p, g))
+	out := string(mustNormalize(t, p, g))
 
 	if !strings.Contains(out, "<object>Account</object>\n        <viewAllFields>true</viewAllFields>") {
 		t.Errorf("viewAllFields from the source entry must be preserved:\n%s", out)

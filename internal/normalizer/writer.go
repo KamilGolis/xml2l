@@ -38,7 +38,12 @@ func WriteProfiles(g NormalizeGraph) error {
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			xmlBytes := NormalizeProfile(profile, g)
+			xmlBytes, err := NormalizeProfile(profile, g)
+			if err != nil {
+				errs <- fmt.Errorf("Normalize %s: %w", profile.SourcePath, err)
+				return
+			}
+
 			if xmlBytes == nil {
 				errs <- fmt.Errorf("No XML generated for %s", profile.Name)
 				return
