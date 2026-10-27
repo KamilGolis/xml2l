@@ -71,6 +71,7 @@ func LoadProfiles(projectPath string) (*graph.SalesforceGraph, error) {
 		p.RawXML = string(r.Raw)
 		p.UserLicense = r.Profile.UserLicense
 		p.Description = r.Profile.Description
+		p.HasDescription = r.Profile.HasDescription
 		p.IsCustom = r.Profile.IsCustom
 		p.HasCustomTag = r.Profile.HasCustomTag
 

@@ -178,7 +178,7 @@ func profileFieldBlocks(p *graph.ProfileNode) []profileBlock {
 		blocks = append(blocks, profileBlock{"custom", "    <custom>" + val + "</custom>\n"})
 	}
 
-	if p.Description != "" {
+	if p.HasDescription || p.Description != "" {
 		blocks = append(blocks, profileBlock{"description", "    <description>" + xmlEscape(p.Description) + "</description>\n"})
 	}
 

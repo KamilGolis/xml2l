@@ -23,7 +23,10 @@ type Profile struct {
 	Description  string
 	IsCustom     bool
 	HasCustomTag bool
-	Sections     map[string][]MetadataEntry
+	// HasDescription records that the element was present, including as an
+	// empty element: an empty description is still data the source carried.
+	HasDescription bool
+	Sections       map[string][]MetadataEntry
 	// Ghosts holds entry names per section that were dropped because their
 	// target has no file in the project. They never reach the graph, so a save
 	// cannot mention them; the cross-reference report surfaces them instead.
@@ -186,6 +189,8 @@ func Decode(r io.Reader, gt scanner.GroundTruth) (*Profile, error) {
 				if err := decoder.DecodeElement(&prof.Description, &t); err != nil {
 					return nil, fmt.Errorf("description: %w", err)
 				}
+
+				prof.HasDescription = true
 			default:
 				if fn, ok := sectionFuncs[tag]; ok {
 					var (
