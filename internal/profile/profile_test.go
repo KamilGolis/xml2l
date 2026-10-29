@@ -1,9 +1,11 @@
 package profile
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
+	"xml2l/internal/graph"
 	"xml2l/internal/scanner"
 )
 
@@ -135,9 +137,9 @@ func TestDecodeGhostFiltering(t *testing.T) {
 	}
 
 	// The dropped entry is reported so the cross-reference can surface it.
-	ghosts := prof.Ghosts["fieldPermissions"]
-	if len(ghosts) != 1 || ghosts[0] != "Contact.GhostField__c" {
-		t.Errorf("expected Contact.GhostField__c as a ghost, got %v", ghosts)
+	wantGhosts := []graph.GhostEntry{{MetaType: graph.MetaTypeField, Name: "Contact.GhostField__c"}}
+	if !slices.Equal(prof.Ghosts, wantGhosts) {
+		t.Errorf("ghosts = %v, want %v", prof.Ghosts, wantGhosts)
 	}
 }
 

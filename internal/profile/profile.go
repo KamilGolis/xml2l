@@ -27,10 +27,10 @@ type Profile struct {
 	// empty element: an empty description is still data the source carried.
 	HasDescription bool
 	Sections       map[string][]MetadataEntry
-	// Ghosts holds entry names per section that were dropped because their
-	// target has no file in the project. They never reach the graph, so a save
-	// cannot mention them; the cross-reference report surfaces them instead.
-	Ghosts map[string][]string
+	// Ghosts are entries dropped because their target has no file in the
+	// project. They never reach the graph, so a save cannot mention them; the
+	// cross-reference report surfaces them instead.
+	Ghosts []graph.GhostEntry
 }
 
 // MetadataEntry represents a single permission entry within a profile section.
@@ -124,7 +124,6 @@ func init() {
 func Decode(r io.Reader, gt scanner.GroundTruth) (*Profile, error) {
 	prof := &Profile{
 		Sections: make(map[string][]MetadataEntry),
-		Ghosts:   make(map[string][]string),
 	}
 
 	decoder := xml.NewDecoder(r)
@@ -214,8 +213,11 @@ func Decode(r io.Reader, gt scanner.GroundTruth) (*Profile, error) {
 						prof.Sections[tag] = append(prof.Sections[tag], entries...)
 					}
 
-					if len(ghosts) > 0 {
-						prof.Ghosts[tag] = append(prof.Ghosts[tag], ghosts...)
+					for _, ghost := range ghosts {
+						prof.Ghosts = append(prof.Ghosts, graph.GhostEntry{
+							MetaType: graph.TagToMetaType(tag),
+							Name:     ghost,
+						})
 					}
 				} else {
 					if err := skipElement(decoder); err != nil {

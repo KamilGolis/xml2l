@@ -1692,6 +1692,87 @@ func TestRenderEntryPreservesUnknownChild(t *testing.T) {
 	}
 }
 
+func TestEntryName(t *testing.T) {
+	cases := []struct {
+		name  string
+		body  string
+		field string
+		want  string
+	}{
+		{
+			name:  "plain",
+			body:  "<classAccesses><apexClass>MyClass</apexClass><enabled>true</enabled></classAccesses>",
+			field: "apexClass",
+			want:  "MyClass",
+		},
+		{
+			name:  "surrounding whitespace",
+			body:  "<fieldPermissions>\n    <field> Account.Name </field>\n</fieldPermissions>",
+			field: "field",
+			want:  "Account.Name",
+		},
+		{
+			name:  "name field is not the first child",
+			body:  "<layoutAssignments><layout>Account-Layout</layout><recordType>RT</recordType></layoutAssignments>",
+			field: "layout",
+			want:  "Account-Layout",
+		},
+		{
+			name:  "no name field",
+			body:  "<classAccesses><enabled>true</enabled></classAccesses>",
+			field: "apexClass",
+			want:  "",
+		},
+		{
+			name:  "empty name field",
+			body:  "<classAccesses><apexClass></apexClass></classAccesses>",
+			field: "apexClass",
+			want:  "",
+		},
+		{
+			name:  "self-closing name field",
+			body:  "<classAccesses><apexClass/></classAccesses>",
+			field: "apexClass",
+			want:  "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := entryName(tc.body, tc.field); got != tc.want {
+				t.Errorf("entryName = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildRawEntryIndexSkipsUnnamedEntries(t *testing.T) {
+	raw := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <classAccesses>
+        <apexClass></apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>Kept</apexClass>
+        <enabled>false</enabled>
+    </classAccesses>
+</Profile>`
+
+	idx, err := buildRawEntryIndex(raw)
+	if err != nil {
+		t.Fatalf("buildRawEntryIndex: %v", err)
+	}
+
+	if _, ok := idx["classAccesses"][""]; ok {
+		t.Error("entry without a name must not be indexed")
+	}
+
+	if _, ok := idx["classAccesses"]["Kept"]; !ok {
+		t.Error("named entry missing from the index")
+	}
+}
+
 func TestProfileBlocksSortTopLevelElements(t *testing.T) {
 	rawXML := `<?xml version="1.0" encoding="UTF-8"?>
 <Profile xmlns="http://soap.sforce.com/2006/04/metadata">

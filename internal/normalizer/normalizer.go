@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -628,10 +627,8 @@ func buildRawEntryIndex(rawXML string) (rawEntryIndex, error) {
 			continue
 		}
 
-		nameRe := regexp.MustCompile(`<` + nameField + `>([^<]*)</` + nameField + `>`)
-
-		m := nameRe.FindStringSubmatch(el.body)
-		if m == nil {
+		name := entryName(el.body, nameField)
+		if name == "" {
 			continue
 		}
 
@@ -639,12 +636,39 @@ func buildRawEntryIndex(rawXML string) (rawEntryIndex, error) {
 			idx[el.tag] = make(map[string]string)
 		}
 
-		if _, exists := idx[el.tag][m[1]]; !exists {
-			idx[el.tag][m[1]] = el.body
+		if _, exists := idx[el.tag][name]; !exists {
+			idx[el.tag][name] = el.body
 		}
 	}
 
 	return idx, nil
+}
+
+// entryName returns the text of an entry's name child, or "" when the entry
+// does not carry one. It tokenizes the entry the same way as the document
+// rather than guessing at the name field with a regular expression.
+func entryName(body, nameField string) string {
+	children, err := scanDirectChildren(body)
+	if err != nil {
+		return ""
+	}
+
+	for _, child := range children {
+		if child.tag != nameField {
+			continue
+		}
+
+		open := strings.Index(child.body, ">")
+		close := strings.LastIndex(child.body, "<")
+
+		if open < 0 || close <= open {
+			return ""
+		}
+
+		return strings.TrimSpace(child.body[open+1 : close])
+	}
+
+	return ""
 }
 
 // modeledTopLevelTags returns the top-level <Profile> child tags the normalizer
