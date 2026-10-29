@@ -53,6 +53,115 @@ func writeProject(t *testing.T) string {
 	return dir
 }
 
+// writeMetaFile writes one metadata file under dir.
+func writeMetaFile(t *testing.T, dir, rel, content string) {
+	t.Helper()
+
+	path := filepath.Join(dir, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// entryPointProject builds a project with one entry-point class and one plain
+// class, both enabled in a single profile.
+func entryPointProject(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+
+	writeMetaFile(t, dir, "classes/Endpoint.cls", "@RestResource(urlMapping='/x')\nglobal class Endpoint {}")
+	writeMetaFile(t, dir, "classes/Unused.cls", "public class Unused {}")
+	writeMetaFile(t, dir, "profiles/Admin.profile-meta.xml", `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <classAccesses>
+        <apexClass>Endpoint</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>Unused</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <userLicense>Salesforce</userLicense>
+</Profile>`)
+
+	return dir
+}
+
+func TestSaveEntryPointClasses(t *testing.T) {
+	dir := entryPointProject(t)
+
+	out, err := execute(t, "profile", "save", "-p", dir, "--entry-point-classes")
+	if err != nil {
+		t.Fatalf("save: %v\n%s", err, out)
+	}
+
+	saved, readErr := os.ReadFile(filepath.Join(dir, "profiles", "Admin.profile-meta.xml"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+
+	if !strings.Contains(string(saved), "<apexClass>Endpoint</apexClass>") {
+		t.Errorf("entry-point class missing:\n%s", saved)
+	}
+
+	if strings.Contains(string(saved), "Unused") {
+		t.Errorf("non-entry-point class must be removed:\n%s", saved)
+	}
+
+	if !strings.Contains(out, "Admin: 2 enabled → 1, removed 1, added 0") {
+		t.Errorf("expected a change summary, got:\n%s", out)
+	}
+}
+
+func TestSaveEntryPointClassesDryRun(t *testing.T) {
+	dir := entryPointProject(t)
+
+	path := filepath.Join(dir, "profiles", "Admin.profile-meta.xml")
+	before, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+
+	out, err := execute(t, "profile", "save", "-p", dir, "--entry-point-classes", "--dry-run")
+	if err != nil {
+		t.Fatalf("dry run: %v\n%s", err, out)
+	}
+
+	if !strings.Contains(out, "Admin: 2 enabled → 1, removed 1, added 0") {
+		t.Errorf("expected the plan, got:\n%s", out)
+	}
+
+	after, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+
+	if string(after) != string(before) {
+		t.Errorf("dry run must not write:\n%s", after)
+	}
+}
+
+func TestSaveDryRunRequiresEntryPointClasses(t *testing.T) {
+	out, err := execute(t, "profile", "save", "-p", entryPointProject(t), "--dry-run")
+
+	if err == nil {
+		t.Fatal("expected an error for --dry-run without --entry-point-classes")
+	}
+
+	if !strings.Contains(out, "requires --entry-point-classes") {
+		t.Errorf("unexpected output:\n%s", out)
+	}
+
+	if !strings.Contains(out, "Usage:") {
+		t.Errorf("a flag combination error should print usage, got:\n%s", out)
+	}
+}
+
 func TestSaveFailsOnUndecodableProfile(t *testing.T) {
 	dir := writeProject(t)
 	truncatedPath := filepath.Join(dir, "profiles", "Trunc.profile-meta.xml")

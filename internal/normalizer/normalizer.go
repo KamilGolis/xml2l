@@ -51,6 +51,7 @@ type NormalizeGraph interface {
 	AvailableLayouts() []string
 	OrgSchema() graph.OrgSchemaProvider
 	ExcludePatterns() []string
+	EntryPointClasses() map[string]bool
 }
 
 // DefaultEdgeProperties returns an EdgeProperties with all boolean fields set to false
@@ -235,11 +236,45 @@ func sectionBlocks(p *graph.ProfileNode, g NormalizeGraph, rawEntries rawEntryIn
 		entries := make([]nameAndProps, 0, len(sectionEntries))
 		entries = append(entries, sectionEntries...)
 
-		// Backfill: add Master Schema entries missing from this profile.
-		// Skip backfill for layoutAssignments — Salesforce requires at most one
-		// layout per object without a recordType, so backfilling from other
-		// profiles creates invalid configurations.
-		if sectionTag != "layoutAssignments" {
+		entryPoints := g.EntryPointClasses()
+
+		switch {
+		case sectionTag == "classAccesses" && entryPoints != nil:
+			// Entry-point mode replaces class-access backfill: only classes
+			// Salesforce invokes on behalf of the running user are written, and
+			// always enabled. Excluded entries are copied from the source, so
+			// they stay exactly as they are and are never pruned.
+			patterns := g.ExcludePatterns()
+			kept := make([]nameAndProps, 0, len(entryPoints))
+			excluded := make(map[string]bool)
+
+			for _, e := range sectionEntries {
+				if len(patterns) > 0 && matchesExclude(e.name, patterns) {
+					kept = append(kept, e)
+					excluded[e.name] = true
+				}
+			}
+
+			enabled := true
+
+			for name := range entryPoints {
+				if excluded[name] || (len(patterns) > 0 && matchesExclude(name, patterns)) {
+					continue
+				}
+
+				kept = append(kept, nameAndProps{
+					name:  name,
+					props: graph.EdgeProperties{Enabled: &enabled},
+				})
+			}
+
+			entries = kept
+
+		case sectionTag != "layoutAssignments":
+			// Backfill: add Master Schema entries missing from this profile.
+			// Skip backfill for layoutAssignments — Salesforce requires at most
+			// one layout per object without a recordType, so backfilling from
+			// other profiles creates invalid configurations.
 			msNamesList := g.MasterSchema().AllNames(sectionTag)
 
 			for _, name := range msNamesList {
@@ -429,6 +464,85 @@ func (r *unknownReport) print(w io.Writer) {
 
 		fmt.Fprintf(w, "warning: %s: preserving unknown element <%s> in %d %s\n", key.section, key.tag, counts[key], unit)
 	}
+}
+
+// ClassAccessChange is what entry-point mode does to one profile's class access.
+type ClassAccessChange struct {
+	Profile string
+	Before  int // enabled class entries before pruning
+	After   int // class entries written after pruning
+	Removed int
+	Added   int
+}
+
+// ClassAccessPlan reports what SetEntryPointClasses would change for every
+// profile. It reads the same inputs as sectionBlocks and writes nothing.
+func ClassAccessPlan(g NormalizeGraph) []ClassAccessChange {
+	required := g.EntryPointClasses()
+	if required == nil {
+		return nil
+	}
+
+	patterns := g.ExcludePatterns()
+	profiles := g.Profiles()
+
+	sort.Slice(profiles, func(i, j int) bool { return profiles[i].Name < profiles[j].Name })
+
+	changes := make([]ClassAccessChange, 0, len(profiles))
+
+	for _, p := range profiles {
+		rawEntries, _ := buildRawEntryIndex(p.RawXML)
+
+		enabled := make(map[string]bool)
+		after := make(map[string]bool)
+
+		for _, e := range g.ProfileEdges(p) {
+			if e.MetadataNode.MetaType != graph.MetaTypeApexClass {
+				continue
+			}
+
+			name := e.MetadataNode.Name
+			if e.Properties.Enabled != nil && *e.Properties.Enabled {
+				enabled[name] = true
+			}
+
+			if len(patterns) > 0 && matchesExclude(name, patterns) {
+				// Excluded entries are copied from the source; without a source
+				// body there is nothing to write.
+				if rawEntries["classAccesses"][name] != "" {
+					after[name] = true
+				}
+
+				continue
+			}
+		}
+
+		for name := range required {
+			if len(patterns) > 0 && matchesExclude(name, patterns) {
+				continue
+			}
+
+			after[name] = true
+		}
+
+		change := ClassAccessChange{Profile: p.Name, Before: len(enabled), After: len(after)}
+
+		for name := range enabled {
+			if !after[name] {
+				change.Removed++
+			}
+		}
+
+		for name := range after {
+			if !enabled[name] {
+				change.Added++
+			}
+		}
+
+		changes = append(changes, change)
+	}
+
+	return changes
 }
 
 func xmlEscape(s string) string {
