@@ -23,6 +23,7 @@ func WriteProfiles(g NormalizeGraph) error {
 		maxWorkers = 1
 	}
 	sem := make(chan struct{}, maxWorkers)
+	unknown := newUnknownReport()
 
 	var wg sync.WaitGroup
 	errs := make(chan error, len(profiles))
@@ -38,7 +39,12 @@ func WriteProfiles(g NormalizeGraph) error {
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			xmlBytes := NormalizeProfile(profile, g)
+			xmlBytes, err := NormalizeProfile(profile, g, unknown)
+			if err != nil {
+				errs <- fmt.Errorf("Normalize %s: %w", profile.SourcePath, err)
+				return
+			}
+
 			if xmlBytes == nil {
 				errs <- fmt.Errorf("No XML generated for %s", profile.Name)
 				return
@@ -54,6 +60,8 @@ func WriteProfiles(g NormalizeGraph) error {
 
 	wg.Wait()
 	close(errs)
+
+	unknown.print(os.Stderr)
 
 	// Collect errors (report first error).
 	var firstErr error
@@ -103,10 +111,46 @@ func writeFileAtomic(path string, data []byte) error {
 		return err
 	}
 
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := replaceFile(tmpName, path); err != nil {
 		return err
 	}
 
 	tmpName = "" // renamed into place; nothing left to clean up
 	return nil
+}
+
+// replaceFile renames tmpName over path. Windows refuses to replace a target
+// that carries the read-only attribute, so a failed rename is retried once with
+// the attribute cleared; the target keeps its mode either way. The original
+// error is returned when the retry does not apply, so a real failure still
+// names its cause.
+func replaceFile(tmpName, path string) error {
+	err := os.Rename(tmpName, path)
+	if err == nil {
+		return nil
+	}
+
+	info, statErr := os.Stat(path)
+	if statErr != nil {
+		return err
+	}
+
+	mode := info.Mode().Perm()
+	if mode&0o200 != 0 {
+		return err
+	}
+
+	if chmodErr := os.Chmod(path, mode|0o200); chmodErr != nil {
+		return err
+	}
+
+	renameErr := os.Rename(tmpName, path)
+
+	// The new file was created with the old mode, so this only guards against
+	// a platform that carried the writable bit across the rename.
+	if chmodErr := os.Chmod(path, mode); chmodErr != nil && renameErr == nil {
+		return chmodErr
+	}
+
+	return renameErr
 }

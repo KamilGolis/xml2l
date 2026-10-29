@@ -80,9 +80,17 @@ to a file.`,
 				return fmt.Errorf("required flag --path / -p is missing")
 			}
 
+			// Everything below touches the filesystem. A failure there is
+			// not a usage error, so stop repeating the flag list.
+			cmd.SilenceUsage = true
+
 			g, err := schema.LoadProfiles(projectPath)
 			if err != nil {
 				return err
+			}
+
+			for _, decodeErr := range g.DecodeErrors() {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %v\n", decodeErr)
 			}
 
 			if len(g.ProfileNodes) < 2 {
@@ -192,8 +200,19 @@ func newSaveCmd() *cobra.Command {
 				g.SetExcludePatterns(excludePatterns)
 			}
 
+			// Everything below touches the filesystem. A failure there is
+			// not a usage error, so stop repeating the flag list.
+			cmd.SilenceUsage = true
+
 			if err := normalizer.WriteProfiles(g); err != nil {
 				return err
+			}
+
+			// A profile that failed to decode was skipped by the loader and
+			// left untouched. Saving the rest is still useful, but the run must
+			// not report success.
+			if decodeErrs := g.DecodeErrors(); len(decodeErrs) > 0 {
+				return fmt.Errorf("%d profile(s) could not be decoded and were left untouched: %w", len(decodeErrs), decodeErrs[0])
 			}
 
 			fmt.Fprintf(os.Stderr, "Done. Profiles saved.\n")
@@ -225,6 +244,10 @@ extension. The source XML files are not modified.`,
 			if projectPath == "" {
 				return fmt.Errorf("required flag --path / -p is missing")
 			}
+
+			// Everything below touches the filesystem. A failure there is
+			// not a usage error, so stop repeating the flag list.
+			cmd.SilenceUsage = true
 
 			return converter.ConvertProfiles(projectPath, profileFlag, profilesFlag)
 		},
@@ -266,6 +289,10 @@ extension. The source XML files are not modified.`,
 			if projectPath == "" {
 				return fmt.Errorf("required flag --path / -p is missing")
 			}
+
+			// Everything below touches the filesystem. A failure there is
+			// not a usage error, so stop repeating the flag list.
+			cmd.SilenceUsage = true
 
 			return converter.ConvertPermSets(projectPath, permsetFlag, permsetsFlag)
 		},

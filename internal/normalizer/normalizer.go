@@ -1,6 +1,7 @@
 // Package normalizer backfills missing Master Schema entries into each profile,
-// sorts all sections alphabetically, serializes to XML, and writes profiles
-// to disk concurrently. Phase 3 of the 3-phase profile normalization pipeline.
+// orders every top-level element and permission property by tag name the way
+// Salesforce writes them, serializes to XML, and writes profiles to disk
+// concurrently. Phase 3 of the 3-phase profile normalization pipeline.
 package normalizer
 
 import (
@@ -11,14 +12,16 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 
 	"xml2l/internal/graph"
 )
 
 // sectionNameField maps each profile section XML tag to the XML element name
 // used for the entry's identifying name within that section. Used by
-// extractRawEntry to locate specific entries in raw profile XML.
+// buildRawEntryIndex to locate specific entries in raw profile XML.
 var sectionNameField = map[string]string{
 	"classAccesses":                 "apexClass",
 	"agentAccesses":                 "agent",
@@ -38,124 +41,6 @@ var sectionNameField = map[string]string{
 	"flowAccesses":                  "flow",
 	"externalDataSourceAccesses":    "externalDataSource",
 	"genComputingSummaryDefAccess":  "enhancedSummaryDef",
-}
-
-// -- XML marshaling structs for each section type.
-
-type classAccessXML struct {
-	XMLName   xml.Name `xml:"classAccesses"`
-	ApexClass string   `xml:"apexClass"`
-	Enabled   bool     `xml:"enabled"`
-}
-
-type agentAccessXML struct {
-	XMLName xml.Name `xml:"agentAccesses"`
-	Agent   string   `xml:"agent"`
-	Enabled bool     `xml:"enabled"`
-}
-
-type appVisibilityXML struct {
-	XMLName     xml.Name `xml:"applicationVisibilities"`
-	Application string   `xml:"application"`
-	Default     bool     `xml:"default"`
-	Visible     bool     `xml:"visible"`
-}
-
-type categoryGroupXML struct {
-	XMLName           xml.Name `xml:"categoryGroupVisibilities"`
-	DataCategoryGroup string   `xml:"dataCategoryGroup"`
-	Visibility        string   `xml:"visibility"`
-}
-
-type customMetadataTypeXML struct {
-	XMLName xml.Name `xml:"customMetadataTypeAccesses"`
-	Name    string   `xml:"name"`
-	Enabled bool     `xml:"enabled"`
-}
-
-type customPermissionXML struct {
-	XMLName xml.Name `xml:"customPermissions"`
-	Name    string   `xml:"name"`
-	Enabled bool     `xml:"enabled"`
-}
-
-type customSettingAccessXML struct {
-	XMLName xml.Name `xml:"customSettingAccesses"`
-	Name    string   `xml:"name"`
-	Enabled bool     `xml:"enabled"`
-}
-
-type fieldPermXML struct {
-	XMLName  xml.Name `xml:"fieldPermissions"`
-	Field    string   `xml:"field"`
-	Readable bool     `xml:"readable"`
-	Editable bool     `xml:"editable"`
-}
-
-type layoutXML struct {
-	XMLName    xml.Name `xml:"layoutAssignments"`
-	Layout     string   `xml:"layout"`
-	RecordType string   `xml:"recordType,omitempty"`
-}
-
-type objectPermXML struct {
-	XMLName     xml.Name `xml:"objectPermissions"`
-	Object      string   `xml:"object"`
-	AllowCreate bool     `xml:"allowCreate"`
-	AllowDelete bool     `xml:"allowDelete"`
-	AllowRead   bool     `xml:"allowRead"`
-	AllowEdit   bool     `xml:"allowEdit"`
-	ModifyAll   bool     `xml:"modifyAllRecords"`
-	ViewAll     bool     `xml:"viewAllRecords"`
-}
-
-type recordTypeXML struct {
-	XMLName    xml.Name `xml:"recordTypeVisibilities"`
-	RecordType string   `xml:"recordType"`
-	Visible    bool     `xml:"visible"`
-	Default    bool     `xml:"default"`
-}
-
-type servicePresenceXML struct {
-	XMLName               xml.Name `xml:"servicePresenceStatusAccesses"`
-	ServicePresenceStatus string   `xml:"servicePresenceStatus"`
-	Enabled               bool     `xml:"enabled"`
-}
-
-type tabVisibilityXML struct {
-	XMLName    xml.Name `xml:"tabVisibilities"`
-	Tab        string   `xml:"tab"`
-	Visibility string   `xml:"visibility"`
-}
-
-type userPermXML struct {
-	XMLName xml.Name `xml:"userPermissions"`
-	Name    string   `xml:"name"`
-	Enabled bool     `xml:"enabled"`
-}
-
-type pageAccessXML struct {
-	XMLName  xml.Name `xml:"pageAccesses"`
-	ApexPage string   `xml:"apexPage"`
-	Enabled  bool     `xml:"enabled"`
-}
-
-type flowAccessXML struct {
-	XMLName xml.Name `xml:"flowAccesses"`
-	Flow    string   `xml:"flow"`
-	Enabled bool     `xml:"enabled"`
-}
-
-type extDataSourceXML struct {
-	XMLName            xml.Name `xml:"externalDataSourceAccesses"`
-	ExternalDataSource string   `xml:"externalDataSource"`
-	Enabled            bool     `xml:"enabled"`
-}
-
-type enhancedSummaryXML struct {
-	XMLName            xml.Name `xml:"genComputingSummaryDefAccess"`
-	EnhancedSummaryDef string   `xml:"enhancedSummaryDef"`
-	Enabled            bool     `xml:"enabled"`
 }
 
 // NormalizeGraph is the interface the normalizer requires to access profile
@@ -201,24 +86,123 @@ func DefaultEdgeProperties(mt graph.MetadataType) graph.EdgeProperties {
 }
 
 // NormalizeProfile generates normalized XML for a single profile by backfilling
-// missing Master Schema entries, sorting all sections, and marshaling to XML.
-func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
+// missing Master Schema entries, sorting every top-level element and every
+// permission property by tag name, and writing the result.
+func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph, unknown *unknownReport) ([]byte, error) {
 	if g.MasterSchema() == nil {
 		// No MasterSchema available — fall back to raw XML.
 		if p.RawXML != "" {
-			return []byte(p.RawXML)
+			return []byte(p.RawXML), nil
 		}
 
-		return nil
+		return nil, nil
 	}
+
+	rawEntries, err := buildRawEntryIndex(p.RawXML)
+	if err != nil {
+		return nil, err
+	}
+
+	blocks, err := profileBlocks(p, g, rawEntries, unknown)
+	if err != nil {
+		return nil, err
+	}
+
+	// Sort every top-level element by tag so output matches what Salesforce
+	// writes on retrieve (ADR-0002). The sort is stable, so entries inside a
+	// section keep their name order.
+	sort.SliceStable(blocks, func(i, j int) bool { return blocks[i].tag < blocks[j].tag })
 
 	var buf bytes.Buffer
 	buf.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	buf.WriteString(`<Profile xmlns="http://soap.sforce.com/2006/04/metadata">` + "\n")
 
-	// Profile-level fields.
-	writeProfileFields(&buf, p)
+	for _, b := range blocks {
+		buf.WriteString(b.text)
+	}
 
+	buf.WriteString("</Profile>\n")
+
+	return buf.Bytes(), nil
+}
+
+// profileBlock is one rendered top-level <Profile> child, tagged with the
+// element name used to sort it into place.
+type profileBlock struct {
+	tag  string
+	text string
+}
+
+// profileBlocks renders every top-level element the profile should contain:
+// profile-level values, modelled sections (with backfill), and sections the
+// normalizer does not model, preserved verbatim.
+func profileBlocks(p *graph.ProfileNode, g NormalizeGraph, rawEntries rawEntryIndex, unknown *unknownReport) ([]profileBlock, error) {
+	blocks := profileFieldBlocks(p)
+
+	blocks = append(blocks, sectionBlocks(p, g, rawEntries, unknown)...)
+
+	preserved, err := preservedBlocks(p.RawXML)
+	if err != nil {
+		return nil, err
+	}
+
+	blocks = append(blocks, preserved...)
+
+	return blocks, nil
+}
+
+// preservedBlocks returns the top-level elements the normalizer does not model,
+// re-indented and in document order, so a save never drops a section outside
+// the graph's scope.
+func preservedBlocks(rawXML string) ([]profileBlock, error) {
+	elems, err := scanDirectChildren(rawXML)
+	if err != nil {
+		return nil, fmt.Errorf("scan profile sections: %w", err)
+	}
+
+	modeled := modeledTopLevelTags()
+
+	var blocks []profileBlock
+
+	for _, el := range elems {
+		if modeled[el.tag] {
+			continue
+		}
+
+		blocks = append(blocks, profileBlock{el.tag, reindentTo(el.body, 4)})
+	}
+
+	return blocks, nil
+}
+
+// profileFieldBlocks renders the profile-level values that live directly under
+// <Profile> rather than inside a permission section.
+func profileFieldBlocks(p *graph.ProfileNode) []profileBlock {
+	var blocks []profileBlock
+
+	if p.UserLicense != "" {
+		blocks = append(blocks, profileBlock{"userLicense", "    <userLicense>" + xmlEscape(p.UserLicense) + "</userLicense>\n"})
+	}
+
+	if p.HasCustomTag {
+		val := "false"
+		if p.IsCustom {
+			val = "true"
+		}
+
+		blocks = append(blocks, profileBlock{"custom", "    <custom>" + val + "</custom>\n"})
+	}
+
+	if p.HasDescription || p.Description != "" {
+		blocks = append(blocks, profileBlock{"description", "    <description>" + xmlEscape(p.Description) + "</description>\n"})
+	}
+
+	return blocks
+}
+
+// sectionBlocks renders every permission entry of every modelled section,
+// backfilling entries the profile lacks and filtering per org schema.
+func sectionBlocks(p *graph.ProfileNode, g NormalizeGraph, rawEntries rawEntryIndex, unknown *unknownReport) []profileBlock {
 	// Pre-group edges by MetadataType so the per-section loop doesn't
 	// iterate all edges for every section type (O(sections × edges) → O(edges + sections)).
 	type nameAndProps struct {
@@ -234,6 +218,8 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 			props: e.Properties,
 		})
 	}
+
+	var blocks []profileBlock
 
 	// Process each section type in stable order.
 	for _, sm := range graph.SectionMetaOrder() {
@@ -351,56 +337,98 @@ func NormalizeProfile(p *graph.ProfileNode, g NormalizeGraph) []byte {
 
 		// Marshal entries in sorted order; excluded entries preserve original XML.
 		patterns := g.ExcludePatterns()
-		nameField, hasNameField := sectionNameField[sectionTag]
+		_, hasNameField := sectionNameField[sectionTag]
 
 		for _, e := range entries {
 			if len(patterns) > 0 && matchesExclude(e.name, patterns) {
 				// Excluded entry: preserve original XML if it exists, otherwise drop.
 				if hasNameField {
-					raw := extractRawEntry(p.RawXML, sectionTag, e.name, nameField)
-
-					if raw != "" {
-						buf.WriteString(raw)
+					if raw := rawEntries[sectionTag][e.name]; raw != "" {
+						blocks = append(blocks, profileBlock{sectionTag, reindentTo(raw, 4)})
 					}
 				}
 				// If no nameField mapping or entry not in raw XML, silently drop.
 				continue
 			}
 
-			xmlBytes, err := marshalEntry(sectionTag, e.name, e.props)
+			xmlBytes, err := renderEntry(sectionTag, e.name, e.props, rawEntries[sectionTag][e.name], unknown)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "warning: marshal %s/%s: %v\n", sectionTag, e.name, err)
 				continue
 			}
 
-			buf.Write(xmlBytes)
+			blocks = append(blocks, profileBlock{sectionTag, string(xmlBytes)})
 		}
 	}
 
-	// Preserve top-level elements the normalizer does not model, in document
-	// order, so a save never drops a section outside the graph's scope.
-	buf.WriteString(extractPreservedSections(p.RawXML))
-
-	buf.WriteString("</Profile>\n")
-	return buf.Bytes()
+	return blocks
 }
 
-// writeProfileFields writes profile-level XML elements.
-func writeProfileFields(buf *bytes.Buffer, p *graph.ProfileNode) {
-	if p.UserLicense != "" {
-		buf.WriteString("    <userLicense>" + xmlEscape(p.UserLicense) + "</userLicense>\n")
+// unknownReport counts permission properties preserved from the source that this
+// build does not model. A run reports each (section, tag) once, so one shared
+// property does not print a line per profile and entry.
+type unknownReport struct {
+	mu     sync.Mutex
+	counts map[unknownKey]int
+}
+
+type unknownKey struct {
+	section string
+	tag     string
+}
+
+func newUnknownReport() *unknownReport {
+	return &unknownReport{counts: make(map[unknownKey]int)}
+}
+
+// add records one preserved property. It is a no-op on a nil report, so callers
+// that only need the bytes can pass nil.
+func (r *unknownReport) add(section, tag string) {
+	if r == nil {
+		return
 	}
 
-	if p.HasCustomTag {
-		val := "false"
-		if p.IsCustom {
-			val = "true"
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.counts[unknownKey{section, tag}]++
+}
+
+// print writes one line per (section, tag) in a stable order.
+func (r *unknownReport) print(w io.Writer) {
+	if r == nil {
+		return
+	}
+
+	r.mu.Lock()
+
+	keys := make([]unknownKey, 0, len(r.counts))
+	for key := range r.counts {
+		keys = append(keys, key)
+	}
+
+	counts := make(map[unknownKey]int, len(r.counts))
+	for key, n := range r.counts {
+		counts[key] = n
+	}
+
+	r.mu.Unlock()
+
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].section != keys[j].section {
+			return keys[i].section < keys[j].section
 		}
-		buf.WriteString("    <custom>" + val + "</custom>\n")
-	}
 
-	if p.Description != "" {
-		buf.WriteString("    <description>" + xmlEscape(p.Description) + "</description>\n")
+		return keys[i].tag < keys[j].tag
+	})
+
+	for _, key := range keys {
+		unit := "entries"
+		if counts[key] == 1 {
+			unit = "entry"
+		}
+
+		fmt.Fprintf(w, "warning: %s: preserving unknown element <%s> in %d %s\n", key.section, key.tag, counts[key], unit)
 	}
 }
 
@@ -411,74 +439,138 @@ func xmlEscape(s string) string {
 	return s
 }
 
-// marshalEntry marshals a single permission entry to XML bytes with 4-space indent.
-func marshalEntry(sectionTag, name string, props graph.EdgeProperties) ([]byte, error) {
-	var v interface{}
+// entryChild is one permission property rendered at its final indentation
+// inside an entry.
+type entryChild struct {
+	tag  string
+	text string
+}
 
+// childLine renders a single permission property at entry-child indentation.
+func childLine(tag, value string) entryChild {
+	return entryChild{tag: tag, text: "        <" + tag + ">" + xmlEscape(value) + "</" + tag + ">\n"}
+}
+
+// boolChild renders a boolean permission property. A nil flag renders false,
+// matching how the tool has always written a flag the source left out.
+func boolChild(tag string, v *bool) entryChild {
+	return childLine(tag, strconv.FormatBool(boolVal(v)))
+}
+
+// entryChildren renders the permission properties modelled for one entry.
+func entryChildren(sectionTag, name string, props graph.EdgeProperties) ([]entryChild, error) {
 	switch sectionTag {
 	case "classAccesses":
-		v = classAccessXML{ApexClass: name, Enabled: boolVal(props.Enabled)}
+		return []entryChild{childLine("apexClass", name), boolChild("enabled", props.Enabled)}, nil
 	case "agentAccesses":
-		v = agentAccessXML{Agent: name, Enabled: boolVal(props.Enabled)}
+		return []entryChild{childLine("agent", name), boolChild("enabled", props.Enabled)}, nil
 	case "applicationVisibilities":
-		v = appVisibilityXML{Application: name, Default: boolVal(props.Default), Visible: boolVal(props.Visible)}
+		return []entryChild{
+			childLine("application", name), boolChild("default", props.Default), boolChild("visible", props.Visible),
+		}, nil
 	case "categoryGroupVisibilities":
-		vis := ""
-
-		if props.Visibility != nil {
-			vis = *props.Visibility
-		}
-		v = categoryGroupXML{DataCategoryGroup: name, Visibility: vis}
-	case "customMetadataTypeAccesses":
-		v = customMetadataTypeXML{Name: name, Enabled: boolVal(props.Enabled)}
-	case "customPermissions":
-		v = customPermissionXML{Name: name, Enabled: boolVal(props.Enabled)}
-	case "customSettingAccesses":
-		v = customSettingAccessXML{Name: name, Enabled: boolVal(props.Enabled)}
+		return []entryChild{childLine("dataCategoryGroup", name), childLine("visibility", strVal(props.Visibility))}, nil
+	case "customMetadataTypeAccesses", "customPermissions", "customSettingAccesses":
+		return []entryChild{childLine("name", name), boolChild("enabled", props.Enabled)}, nil
 	case "fieldPermissions":
-		v = fieldPermXML{Field: name, Readable: boolVal(props.Readable), Editable: boolVal(props.Editable)}
+		return []entryChild{
+			childLine("field", name), boolChild("readable", props.Readable), boolChild("editable", props.Editable),
+		}, nil
 	case "flowAccesses":
-		v = flowAccessXML{Flow: name, Enabled: boolVal(props.Enabled)}
+		return []entryChild{childLine("flow", name), boolChild("enabled", props.Enabled)}, nil
 	case "genComputingSummaryDefAccess":
-		v = enhancedSummaryXML{EnhancedSummaryDef: name, Enabled: boolVal(props.Enabled)}
+		return []entryChild{childLine("enhancedSummaryDef", name), boolChild("enabled", props.Enabled)}, nil
 	case "externalDataSourceAccesses":
-		v = extDataSourceXML{ExternalDataSource: name, Enabled: boolVal(props.Enabled)}
+		return []entryChild{childLine("externalDataSource", name), boolChild("enabled", props.Enabled)}, nil
 	case "layoutAssignments":
-		rt := ""
+		children := []entryChild{childLine("layout", name)}
 
-		if props.RecordType != nil {
-			rt = *props.RecordType
+		if rt := strVal(props.RecordType); rt != "" {
+			children = append(children, childLine("recordType", rt))
 		}
-		v = layoutXML{Layout: name, RecordType: rt}
+
+		return children, nil
 	case "objectPermissions":
-		v = objectPermXML{
-			Object:      name,
-			AllowCreate: boolVal(props.AllowCreate), AllowDelete: boolVal(props.AllowDelete),
-			AllowRead: boolVal(props.AllowRead), AllowEdit: boolVal(props.AllowEdit),
-			ModifyAll: boolVal(props.ModifyAll), ViewAll: boolVal(props.ViewAll),
+		children := []entryChild{
+			boolChild("allowCreate", props.AllowCreate),
+			boolChild("allowDelete", props.AllowDelete),
+			boolChild("allowRead", props.AllowRead),
+			boolChild("allowEdit", props.AllowEdit),
+			boolChild("modifyAllRecords", props.ModifyAll),
+			childLine("object", name),
+			boolChild("viewAllRecords", props.ViewAll),
 		}
+
+		// viewAllFields is preserved, never backfilled (ADR-0003): emit it only
+		// when the source entry carried it.
+		if props.ViewAllFields != nil {
+			children = append(children, boolChild("viewAllFields", props.ViewAllFields))
+		}
+
+		return children, nil
 	case "pageAccesses":
-		v = pageAccessXML{ApexPage: name, Enabled: boolVal(props.Enabled)}
+		return []entryChild{childLine("apexPage", name), boolChild("enabled", props.Enabled)}, nil
 	case "recordTypeVisibilities":
-		v = recordTypeXML{RecordType: name, Visible: boolVal(props.Visible), Default: boolVal(props.Default)}
+		return []entryChild{
+			childLine("recordType", name), boolChild("visible", props.Visible), boolChild("default", props.Default),
+		}, nil
 	case "servicePresenceStatusAccesses":
-		v = servicePresenceXML{ServicePresenceStatus: name, Enabled: boolVal(props.Enabled)}
+		return []entryChild{childLine("servicePresenceStatus", name), boolChild("enabled", props.Enabled)}, nil
 	case "tabVisibilities":
-		v = tabVisibilityXML{Tab: name, Visibility: strVal(props.Visibility)}
+		return []entryChild{childLine("tab", name), childLine("visibility", strVal(props.Visibility))}, nil
 	case "userPermissions":
-		v = userPermXML{Name: name, Enabled: boolVal(props.Enabled)}
+		return []entryChild{childLine("name", name), boolChild("enabled", props.Enabled)}, nil
 	default:
 		return nil, fmt.Errorf("unknown section tag: %s", sectionTag)
 	}
+}
 
-	out, err := xml.MarshalIndent(v, "    ", "    ")
+// marshalEntry renders one entry from graph properties alone.
+func marshalEntry(sectionTag, name string, props graph.EdgeProperties) ([]byte, error) {
+	return renderEntry(sectionTag, name, props, "", nil)
+}
+
+// renderEntry renders one entry, merging the properties modelled in the graph
+// with any property this build does not model that the source entry carried.
+// Unknown properties are preserved verbatim and reported on stderr so they can
+// be modelled instead of silently lost.
+func renderEntry(sectionTag, name string, props graph.EdgeProperties, rawEntry string, unknown *unknownReport) ([]byte, error) {
+	children, err := entryChildren(sectionTag, name, props)
 	if err != nil {
 		return nil, err
 	}
-	// xml.MarshalIndent produces leading indent, but we want the element at 4-space depth.
-	// The MarshalIndent prefix is "    " (4 spaces), so the element already has correct indent.
-	// Add newline after the element.
-	return append(out, '\n'), nil
+
+	if rawEntry != "" {
+		known := make(map[string]bool, len(children))
+		for _, c := range children {
+			known[c.tag] = true
+		}
+
+		if rawChildren, err := scanDirectChildren(rawEntry); err == nil {
+			for _, rc := range rawChildren {
+				if known[rc.tag] {
+					continue
+				}
+
+				unknown.add(sectionTag, rc.tag)
+
+				children = append(children, entryChild{tag: rc.tag, text: reindentTo(rc.body, 8)})
+			}
+		}
+	}
+
+	sort.SliceStable(children, func(i, j int) bool { return children[i].tag < children[j].tag })
+
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "    <%s>\n", sectionTag)
+
+	for _, c := range children {
+		buf.WriteString(c.text)
+	}
+
+	fmt.Fprintf(&buf, "    </%s>\n", sectionTag)
+
+	return buf.Bytes(), nil
 }
 
 func boolVal(b *bool) bool {
@@ -520,21 +612,44 @@ func matchesExclude(name string, patterns []string) bool {
 	return false
 }
 
-// extractRawEntry finds a single <sectionTag>...</sectionTag> element in rawXML
-// whose name child element matches entryName, and returns it with 4-space
-// indentation. Returns empty string if not found.
-func extractRawEntry(rawXML, sectionTag, entryName, nameField string) string {
-	if rawXML == "" || sectionTag == "" || nameField == "" {
-		return ""
+// rawEntryIndex maps a section tag to its entries' raw XML, keyed by the
+// section's name field. It is built once per profile so rendering an entry can
+// reach the properties the graph does not model without re-scanning the
+// document for every entry.
+type rawEntryIndex map[string]map[string]string
+
+// buildRawEntryIndex indexes every entry of every section that has a name field.
+func buildRawEntryIndex(rawXML string) (rawEntryIndex, error) {
+	idx := make(rawEntryIndex)
+
+	elems, err := scanDirectChildren(rawXML)
+	if err != nil {
+		return nil, err
 	}
-	re := regexp.MustCompile(`(?s)<` + sectionTag + `>.*?</` + sectionTag + `>`)
-	nameMarker := "<" + nameField + ">" + entryName + "</" + nameField + ">"
-	for _, block := range re.FindAllString(rawXML, -1) {
-		if strings.Contains(block, nameMarker) {
-			return reindentEntry(block)
+
+	for _, el := range elems {
+		nameField, ok := sectionNameField[el.tag]
+		if !ok {
+			continue
+		}
+
+		nameRe := regexp.MustCompile(`<` + nameField + `>([^<]*)</` + nameField + `>`)
+
+		m := nameRe.FindStringSubmatch(el.body)
+		if m == nil {
+			continue
+		}
+
+		if idx[el.tag] == nil {
+			idx[el.tag] = make(map[string]string)
+		}
+
+		if _, exists := idx[el.tag][m[1]]; !exists {
+			idx[el.tag][m[1]] = el.body
 		}
 	}
-	return ""
+
+	return idx, nil
 }
 
 // modeledTopLevelTags returns the top-level <Profile> child tags the normalizer
@@ -555,16 +670,16 @@ func modeledTopLevelTags() map[string]bool {
 	return tags
 }
 
-// rawElement is a top-level child element of <Profile> captured verbatim.
+// rawElement is a top-level child element captured verbatim.
 type rawElement struct {
 	tag  string
 	body string
 }
 
-// scanTopLevelElements returns the raw text of every direct child of <Profile>
-// in document order. Offsets come from the tokenizer, so nested elements and
-// repeated tags are captured exactly as they appear in the source.
-func scanTopLevelElements(rawXML string) ([]rawElement, error) {
+// scanDirectChildren returns the raw text of every direct child of the document
+// root, in document order. Offsets come from the tokenizer, so nested elements
+// and repeated tags are captured exactly as they appear in the source.
+func scanDirectChildren(rawXML string) ([]rawElement, error) {
 	if rawXML == "" {
 		return nil, nil
 	}
@@ -624,38 +739,14 @@ func nextTagOffset(s string, from int64) int64 {
 	return int64(i)
 }
 
-// extractPreservedSections returns the top-level elements the normalizer does
-// not model, re-indented and in document order. Returns "" when there is
-// nothing to preserve or the source cannot be parsed.
-func extractPreservedSections(rawXML string) string {
-	elems, err := scanTopLevelElements(rawXML)
-	if err != nil {
-		return ""
-	}
-
-	modeled := modeledTopLevelTags()
-
-	var buf strings.Builder
-
-	for _, el := range elems {
-		if modeled[el.tag] {
-			continue
-		}
-
-		buf.WriteString(reindentEntry(el.body))
-	}
-
-	return buf.String()
-}
-
-// reindentEntry normalizes an extracted XML block to 4-space base indentation
-// while preserving the relative depth of child elements. The regex capture
-// strips the opening tag's leading whitespace, so the first line is set to
-// 4 spaces; all other lines are shifted by (4 - closingTagIndent).
-func reindentEntry(block string) string {
+// reindentTo normalizes a block's base indentation to base spaces while
+// preserving the relative depth of nested elements. The block's first line is
+// its opening tag and its last non-empty line is its closing tag.
+func reindentTo(block string, base int) string {
 	lines := strings.Split(block, "\n")
 	// Find the closing tag's indentation (last non-empty line).
 	baseIndent := 0
+
 	for i := len(lines) - 1; i >= 0; i-- {
 		trimmed := strings.TrimSpace(lines[i])
 		if trimmed != "" {
@@ -663,23 +754,28 @@ func reindentEntry(block string) string {
 			break
 		}
 	}
-	shift := 4 - baseIndent
+
+	shift := base - baseIndent
 	var buf bytes.Buffer
+
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
 		}
+
 		if i == 0 {
-			buf.WriteString("    " + trimmed + "\n")
-		} else {
-			currentIndent := len(line) - len(strings.TrimLeft(line, " \t"))
-			newIndent := currentIndent + shift
-			if newIndent < 0 {
-				newIndent = 0
-			}
-			buf.WriteString(strings.Repeat(" ", newIndent) + trimmed + "\n")
+			buf.WriteString(strings.Repeat(" ", base) + trimmed + "\n")
+			continue
 		}
+
+		newIndent := len(line) - len(strings.TrimLeft(line, " \t")) + shift
+		if newIndent < 0 {
+			newIndent = 0
+		}
+
+		buf.WriteString(strings.Repeat(" ", newIndent) + trimmed + "\n")
 	}
+
 	return buf.String()
 }

@@ -14,7 +14,7 @@ type fieldPermEntry struct {
 	Editable *bool  `xml:"editable"`
 }
 
-func decodeFieldPermissions(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry) error {
+func decodeFieldPermissions(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, ghosts *[]string) error {
 	var entry fieldPermEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {
@@ -26,6 +26,8 @@ func decodeFieldPermissions(decoder *xml.Decoder, se *xml.StartElement, gt scann
 	}
 
 	if !gt[entry.Field] {
+		*ghosts = append(*ghosts, entry.Field)
+
 		return nil
 	}
 

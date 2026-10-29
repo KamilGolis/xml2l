@@ -3,8 +3,11 @@ package normalizer
 import (
 	"bytes"
 	"encoding/xml"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -161,7 +164,7 @@ func TestNormalizeProfileBackfill(t *testing.T) {
 	g.AddEdge(p, fieldNode, graph.EdgeProperties{Readable: boolPtr(true), Editable: boolPtr(true)})
 	g.AddEdge(p, classNode, graph.EdgeProperties{Enabled: boolPtr(true)})
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	// Should contain existing entry with correct permissions.
@@ -202,7 +205,7 @@ func TestNormalizeProfileLayoutNoBackfill(t *testing.T) {
 	layoutNode := g.GetOrCreateMetadataNode(graph.MetaTypeLayout, "Account-Account Layout")
 	g.AddEdge(p, layoutNode, graph.EdgeProperties{})
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	// Existing layout must be present.
@@ -235,7 +238,7 @@ func TestNormalizeProfileLayoutSortByRecordType(t *testing.T) {
 	emptyRT := ""
 	g.AddEdge(p, layoutNode, graph.EdgeProperties{RecordType: &emptyRT})
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	// Entries should appear in order: no recordType, then RT1, then RT2.
@@ -268,7 +271,7 @@ func TestNormalizeProfileLayoutDefaultFromDisk(t *testing.T) {
 	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
 
 	// Profile has NO layout assignments at all.
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	if !strings.Contains(output, "Account-Account Layout") {
@@ -299,7 +302,7 @@ func TestNormalizeProfileLayoutNoDefaultWhenEntriesExist(t *testing.T) {
 	node := g.GetOrCreateMetadataNode(graph.MetaTypeLayout, "Account-Custom Layout")
 	g.AddEdge(p, node, graph.EdgeProperties{RecordType: &rt})
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	if !strings.Contains(output, "Account-Custom Layout") {
@@ -342,7 +345,7 @@ func TestNormalizeProfileLayoutFiltersMultipleNoRecordType(t *testing.T) {
 		g.AddEdge(p, node, graph.EdgeProperties{RecordType: rtPtr})
 	}
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	if !strings.Contains(output, "Account-Account Layout") {
@@ -378,7 +381,7 @@ func TestNormalizeProfileLayoutDedupRecordTypes(t *testing.T) {
 	g.AddEdge(p, node1, graph.EdgeProperties{RecordType: &rt})
 	g.AddEdge(p, node2, graph.EdgeProperties{RecordType: &rt})
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	if !strings.Contains(output, "Account-Alpha Layout") {
@@ -401,7 +404,7 @@ func TestNormalizeProfileXMLHeader(t *testing.T) {
 	p, _ := g.AddProfile("Admin", "test.profile-meta.xml")
 	p.UserLicense = "Salesforce"
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	if !strings.HasPrefix(output, `<?xml version="1.0" encoding="UTF-8"?>`) {
@@ -413,7 +416,7 @@ func TestNormalizeProfileXMLHeader(t *testing.T) {
 	}
 }
 
-func TestExtractPreservedSections(t *testing.T) {
+func TestPreservedBlocks(t *testing.T) {
 	rawXML := `<?xml version="1.0"?>
 <Profile xmlns="http://soap.sforce.com/2006/04/metadata">
     <userLicense>Salesforce</userLicense>
@@ -443,46 +446,73 @@ func TestExtractPreservedSections(t *testing.T) {
     </profileActionOverrides>
 </Profile>`
 
-	preserved := extractPreservedSections(rawXML)
+	blocks, err := preservedBlocks(rawXML)
+	if err != nil {
+		t.Fatalf("preservedBlocks: %v", err)
+	}
+
+	byTag := make(map[string]int)
+
+	var text strings.Builder
+
+	for _, b := range blocks {
+		byTag[b.tag]++
+		text.WriteString(b.text)
+	}
 
 	for _, tag := range []string{"loginHours", "loginIpRanges", "loginFlows", "fieldLevelSecurities", "profileActionOverrides"} {
-		if !strings.Contains(preserved, tag) {
+		if byTag[tag] == 0 {
 			t.Errorf("missing %s", tag)
 		}
 	}
 
-	if !strings.Contains(preserved, "Monday") {
+	if byTag["loginIpRanges"] != 2 {
+		t.Errorf("expected 2 loginIpRanges blocks, got %d", byTag["loginIpRanges"])
+	}
+
+	if !strings.Contains(text.String(), "Monday") {
 		t.Error("missing loginHours content")
 	}
 
-	// Verify both loginIpRanges entries are preserved.
-	if strings.Count(preserved, "    <loginIpRanges>") != 2 {
-		t.Errorf("expected 2 loginIpRanges entries, got %d", strings.Count(preserved, "    <loginIpRanges>"))
-	}
-
-	if !strings.Contains(preserved, "MyFlow") {
+	if !strings.Contains(text.String(), "MyFlow") {
 		t.Error("missing loginFlows content")
 	}
 
 	// Modeled sections are written by the normalizer, so they must not be
 	// preserved here.
-	if strings.Contains(preserved, "classAccesses") {
-		t.Error("classAccesses is modeled and should not be preserved")
+	if byTag["classAccesses"] != 0 || byTag["userLicense"] != 0 {
+		t.Errorf("modeled sections must not be preserved: %v", byTag)
 	}
 }
 
-func TestExtractPreservedSectionsEmpty(t *testing.T) {
-	if got := extractPreservedSections(""); got != "" {
-		t.Errorf("expected empty, got %q", got)
+func TestPreservedBlocksEmpty(t *testing.T) {
+	if got, err := preservedBlocks(""); err != nil || len(got) != 0 {
+		t.Errorf("expected none, got %v (err %v)", got, err)
 	}
 
-	if got := extractPreservedSections("<Profile/>"); got != "" {
-		t.Errorf("expected empty for Profile-only, got %q", got)
+	if got, err := preservedBlocks("<Profile/>"); err != nil || len(got) != 0 {
+		t.Errorf("expected none for Profile-only, got %v (err %v)", got, err)
 	}
 
-	// Malformed input must not panic and must yield no preservation.
-	if got := extractPreservedSections("<Profile><oops>"); got != "" {
-		t.Errorf("expected empty for malformed XML, got %q", got)
+	// Malformed input must be reported, not silently dropped.
+	if _, err := preservedBlocks("<Profile><oops>"); err == nil {
+		t.Error("expected an error for malformed XML")
+	}
+}
+
+func TestNormalizeProfileRejectsUnparseableRawXML(t *testing.T) {
+	g := graph.NewGraph()
+	g.SetMasterSchema(schema.NewMasterSchema())
+
+	p, err := g.AddProfile("Broken", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p.RawXML = `<Profile xmlns="http://soap.sforce.com/2006/04/metadata"><loginIpRanges>`
+
+	if _, err := NormalizeProfile(p, g, nil); err == nil {
+		t.Fatal("expected an error instead of a profile without its unmodelled sections")
 	}
 }
 
@@ -504,7 +534,7 @@ func TestNormalizeProfilePreservesLoginHours(t *testing.T) {
 	p.RawXML = rawXML
 	p.UserLicense = "Salesforce"
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	if !strings.Contains(output, "loginHours") {
@@ -534,7 +564,7 @@ func TestNormalizeProfilePreservesLoginFlows(t *testing.T) {
 	p.RawXML = rawXML
 	p.UserLicense = "Salesforce"
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	if !strings.Contains(output, "loginFlows") {
@@ -581,7 +611,7 @@ func TestNormalizeProfileValidXML(t *testing.T) {
 	p, _ := g.AddProfile("Admin", "test.profile-meta.xml")
 	p.UserLicense = "Salesforce"
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 
 	// Parse back to verify it's well-formed XML.
 	decoder := xml.NewDecoder(bytes.NewReader(xmlBytes))
@@ -611,7 +641,7 @@ func TestNormalizeProfileTabVisBackfillNoEmptyTag(t *testing.T) {
 	g.SetMasterSchema(ms)
 	p, _ := g.AddProfile("Admin", "test.profile-meta.xml")
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	// Tab vis entry should be present.
@@ -639,7 +669,7 @@ func TestNormalizeProfileAlphabeticalSort(t *testing.T) {
 	g.SetMasterSchema(ms)
 	p, _ := g.AddProfile("Admin", "test.profile-meta.xml")
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 
 	// Check that fields appear in alphabetical order.
 	aPos := bytes.Index(xmlBytes, []byte("AField"))
@@ -707,7 +737,7 @@ func TestNormalizeProfileOrgSchemaFiltersApexClass(t *testing.T) {
 	nodeA := g.GetOrCreateMetadataNode(graph.MetaTypeApexClass, "ClassA")
 	g.AddEdge(p, nodeA, graph.EdgeProperties{Enabled: boolPtr(true)})
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	if !strings.Contains(output, "ClassA") {
@@ -740,7 +770,7 @@ func TestNormalizeProfileOrgSchemaFiltersLayouts(t *testing.T) {
 
 	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	if !strings.Contains(output, "Account-Account Layout") {
@@ -784,7 +814,7 @@ func TestMatchesExclude(t *testing.T) {
 	}
 }
 
-func TestExtractRawEntry(t *testing.T) {
+func TestBuildRawEntryIndex(t *testing.T) {
 	raw := `<?xml version="1.0" encoding="UTF-8"?>
 <Profile xmlns="http://soap.sforce.com/2006/04/metadata">
     <userPermissions>
@@ -806,56 +836,29 @@ func TestExtractRawEntry(t *testing.T) {
     </fieldPermissions>
 </Profile>`
 
-	// Found — userPermissions with name "ChatterInternal".
-	got := extractRawEntry(raw, "userPermissions", "ChatterInternal", "name")
-
-	if got == "" {
-		t.Fatal("expected to find ChatterInternal entry")
+	idx, err := buildRawEntryIndex(raw)
+	if err != nil {
+		t.Fatalf("buildRawEntryIndex: %v", err)
 	}
 
-	if !strings.Contains(got, "ChatterInternal") {
-		t.Error("extracted entry should contain the entry name")
+	if got := idx["userPermissions"]["ChatterInternal"]; !strings.Contains(got, "<enabled>true</enabled>") {
+		t.Errorf("expected ChatterInternal entry, got %q", got)
 	}
 
-	if !strings.HasPrefix(got, "    ") {
-		t.Error("extracted entry should be 4-space indented")
+	if got := idx["userPermissions"]["StandardUserPerm"]; !strings.Contains(got, "<enabled>false</enabled>") {
+		t.Errorf("expected StandardUserPerm entry, got %q", got)
 	}
 
-	// Child elements should be indented to 8 spaces, not flattened to 4.
-	if !strings.Contains(got, "        <name>ChatterInternal</name>") {
-		t.Error("extracted entry child elements should be 8-space indented, got:\n" + got)
+	if got := idx["classAccesses"]["MyClass"]; !strings.Contains(got, "<apexClass>MyClass</apexClass>") {
+		t.Errorf("expected MyClass entry, got %q", got)
 	}
 
-	// Found — classAccesses with name "MyClass".
-	got2 := extractRawEntry(raw, "classAccesses", "MyClass", "apexClass")
-
-	if got2 == "" {
-		t.Fatal("expected to find MyClass entry")
+	if got := idx["fieldPermissions"]["Account.Revenue__c"]; !strings.Contains(got, "<readable>true</readable>") {
+		t.Errorf("expected Account.Revenue__c entry, got %q", got)
 	}
 
-	if !strings.Contains(got2, "MyClass") {
-		t.Error("extracted entry should contain the class name")
-	}
-
-	// Found — fieldPermissions with name "Account.Revenue__c".
-	got3 := extractRawEntry(raw, "fieldPermissions", "Account.Revenue__c", "field")
-
-	if got3 == "" {
-		t.Fatal("expected to find Account.Revenue__c entry")
-	}
-
-	// Not found — entry not in raw XML.
-	got4 := extractRawEntry(raw, "userPermissions", "NonExistent", "name")
-
-	if got4 != "" {
-		t.Error("expected empty string for non-existent entry")
-	}
-
-	// Empty raw XML.
-	got5 := extractRawEntry("", "userPermissions", "Test", "name")
-
-	if got5 != "" {
-		t.Error("expected empty string for empty raw XML")
+	if _, ok := idx["userPermissions"]["NonExistent"]; ok {
+		t.Error("expected no index entry for a name absent from the source")
 	}
 }
 
@@ -891,7 +894,7 @@ func TestNormalizeProfileExcludePreservesOriginal(t *testing.T) {
 	node2 := g.GetOrCreateMetadataNode(graph.MetaTypeUserPerm, "StandardUserPerm")
 	g.AddEdge(p, node2, graph.EdgeProperties{Enabled: boolPtr(true)})
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	// ChatterInternal should be preserved from raw XML (enabled=false),
@@ -930,7 +933,7 @@ func TestNormalizeProfileExcludeDropsBackfilled(t *testing.T) {
 	node := g.GetOrCreateMetadataNode(graph.MetaTypeUserPerm, "ChatterInternal")
 	g.AddEdge(p, node, graph.EdgeProperties{Enabled: boolPtr(true)})
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	// ChatterInternal (in raw XML) should be preserved.
@@ -984,7 +987,7 @@ func TestNormalizeProfileExcludeOrdering(t *testing.T) {
 		g.AddEdge(p, node, graph.EdgeProperties{Enabled: boolPtr(true)})
 	}
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	// All entries should be in alphabetical order: A_Normal, B_Normal, X_Excluded, Y_Excluded.
@@ -1032,7 +1035,7 @@ func TestNormalizeProfileExcludeNoEffectWhenOmitted(t *testing.T) {
 		g.AddEdge(p, node, graph.EdgeProperties{Enabled: boolPtr(true)})
 	}
 
-	xmlBytes := NormalizeProfile(p, g)
+	xmlBytes := mustNormalize(t, p, g)
 	output := string(xmlBytes)
 
 	// Both entries should be marshaled (enabled=true from graph), not preserved from raw XML.
@@ -1065,7 +1068,7 @@ func TestNormalizeProfilePreservesUnmodeledSections(t *testing.T) {
 	p.RawXML = rawXML
 	p.UserLicense = "Salesforce"
 
-	out := string(NormalizeProfile(p, g))
+	out := string(mustNormalize(t, p, g))
 
 	for _, tag := range []string{"fieldLevelSecurities", "loginHours"} {
 		if !strings.Contains(out, tag) {
@@ -1098,18 +1101,37 @@ func TestNormalizeProfileOrgSchemaUnqueriedTypeKeepsEntries(t *testing.T) {
 	node := g.GetOrCreateMetadataNode(graph.MetaTypeApexClass, "ClassA")
 	g.AddEdge(p, node, graph.EdgeProperties{Enabled: boolPtr(true)})
 
-	out := string(NormalizeProfile(p, g))
+	out := string(mustNormalize(t, p, g))
 
 	if !strings.Contains(out, "ClassA") {
 		t.Error("entries of an unqueried type must not be filtered out")
 	}
 }
 
+// mustNormalize renders a profile and fails the test on a parse error.
+func mustNormalize(t *testing.T, p *graph.ProfileNode, g NormalizeGraph) []byte {
+	t.Helper()
+
+	out, err := NormalizeProfile(p, g, nil)
+	if err != nil {
+		t.Fatalf("normalize %s: %v", p.Name, err)
+	}
+
+	return out
+}
+
 func TestWriteFileAtomic(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "X.profile-meta.xml")
 
-	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+	// 0640 rather than 0600: the temporary file writeFileAtomic creates is 0600,
+	// so a 0600 source would keep passing even if the mode were never preserved.
+	if err := os.WriteFile(path, []byte("old"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := os.Stat(path)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -1131,8 +1153,12 @@ func TestWriteFileAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if info.Mode().Perm() != 0o600 {
-		t.Errorf("mode = %v, want 0600 (preserved)", info.Mode().Perm())
+	// Compare against the mode the file actually had. Windows has no POSIX
+	// permission bits: Go maps only the owner-write bit to the read-only
+	// attribute, so 0640 is reported back as 0666 there and a literal 0600
+	// assertion can never hold.
+	if info.Mode().Perm() != before.Mode().Perm() {
+		t.Errorf("mode = %v, want %v (preserved)", info.Mode().Perm(), before.Mode().Perm())
 	}
 
 	entries, err := os.ReadDir(dir)
@@ -1142,5 +1168,673 @@ func TestWriteFileAtomic(t *testing.T) {
 
 	if len(entries) != 1 {
 		t.Errorf("expected only the target file, got %d entries (temp file left behind?)", len(entries))
+	}
+}
+
+func TestWriteFileAtomicReadOnlyTarget(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "X.profile-meta.xml")
+
+	if err := os.WriteFile(path, []byte("old"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chmod(path, 0o444); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if before.Mode().Perm()&0o200 != 0 {
+		t.Skipf("filesystem does not honour a read-only mode: %v", before.Mode().Perm())
+	}
+
+	if err := writeFileAtomic(path, []byte("new")); err != nil {
+		t.Fatalf("writeFileAtomic on a read-only file: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(got) != "new" {
+		t.Errorf("content = %q, want %q", got, "new")
+	}
+
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if after.Mode().Perm() != before.Mode().Perm() {
+		t.Errorf("mode = %v, want %v (read-only preserved)", after.Mode().Perm(), before.Mode().Perm())
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(entries) != 1 {
+		t.Errorf("expected only the target file, got %d entries (temp file left behind?)", len(entries))
+	}
+}
+
+// TestNormalizeProfileRetrieveFidelity pins the saved shape against two real
+// profiles retrieved from an org. The saved output may differ from the retrieved
+// files only by backfilled entries and by ghost references dropped for having no
+// file in the project (ADR-0001). Ordering must match exactly (ADR-0002).
+func TestNormalizeProfileRetrieveFidelity(t *testing.T) {
+	const fixtureDir = "testdata/retrieve-fidelity"
+
+	profileNames := []string{"Admin", "Coupons Profile"}
+	dir := t.TempDir()
+
+	fields := make(map[string]bool)
+	classes := make(map[string]bool)
+	retrieved := make(map[string]string)
+
+	for _, name := range profileNames {
+		raw := readFixture(t, filepath.Join(fixtureDir, name+".retrieved.xml"))
+
+		dst := filepath.Join(dir, "profiles", name+".profile-meta.xml")
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(dst, raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		collectEntryNames(t, name, raw, fields, classes)
+		retrieved[name] = string(raw)
+	}
+
+	// Ghost references: the org profiles still list these two standard fields,
+	// but the project never retrieved field metadata for them, so they are
+	// dropped and must stay out of the saved output.
+	droppedFields := map[string]bool{
+		"Case.ClosedOnCreate": true,
+		"Case.IsVisibleInCss": true,
+	}
+
+	for field := range fields {
+		if droppedFields[field] {
+			continue
+		}
+
+		obj, fieldName, ok := strings.Cut(field, ".")
+		if !ok {
+			t.Fatalf("field entry %q has no object prefix", field)
+		}
+
+		path := filepath.Join(dir, "objects", obj, "fields", fieldName+".field-meta.xml")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(path, []byte("<CustomField/>\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for class := range classes {
+		path := filepath.Join(dir, "classes", class+".cls")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(path, []byte("// fixture\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	g, err := schema.LoadProfiles(dir)
+	if err != nil {
+		t.Fatalf("load fixture project: %v", err)
+	}
+
+	if len(g.Profiles()) != len(profileNames) {
+		t.Fatalf("expected %d profiles, got %d", len(profileNames), len(g.Profiles()))
+	}
+
+	for _, p := range g.Profiles() {
+		want := readFixture(t, filepath.Join(fixtureDir, p.Name+".golden.xml"))
+
+		got := string(mustNormalize(t, p, g))
+		if got != string(want) {
+			t.Errorf("%s: saved output differs from golden at %s", p.Name, firstDifference(string(want), got))
+		}
+
+		for field := range droppedFields {
+			if strings.Contains(got, "<field>"+field+"</field>") {
+				t.Errorf("%s: ghost reference %s must be dropped, not saved", p.Name, field)
+			}
+		}
+
+		assertRetrieveCompatible(t, p.Name, retrieved[p.Name], got, droppedFields)
+	}
+}
+
+// assertRetrieveCompatible checks the saved output against the retrieved file
+// itself: ADR-0002 claims a save keeps the retrieved structure, and comparing
+// with a golden alone cannot prove it, because the golden can be regenerated
+// from the same wrong renderer.
+func assertRetrieveCompatible(t *testing.T, profileName, retrieved, saved string, droppedFields map[string]bool) {
+	t.Helper()
+
+	want := shapeProfile(t, profileName+" retrieved", retrieved)
+	got := shapeProfile(t, profileName+" saved", saved)
+
+	if i, ok := firstUnsorted(got.tags); ok {
+		t.Errorf("%s: top-level elements are not alphabetical: %s before %s", profileName, got.tags[i-1], got.tags[i])
+	}
+
+	// The saved file may add entries and sections (backfill), but it must not
+	// reorder or drop the sections the source carried. Runs are collapsed
+	// because a section's entries are contiguous in both files.
+	wantSections := compressRuns(want.tags)
+	gotSections := compressRuns(got.tags)
+	next := 0
+
+	for _, tag := range gotSections {
+		if next < len(wantSections) && tag == wantSections[next] {
+			next++
+		}
+	}
+
+	if next != len(wantSections) {
+		t.Errorf("%s: saved sections %v do not retain the retrieved sections %v", profileName, gotSections, wantSections)
+	}
+
+	dropped := make(map[string]bool, len(droppedFields))
+
+	for field := range droppedFields {
+		dropped["fieldPermissions/"+field] = true
+	}
+
+	for key, wantChildren := range want.entries {
+		if dropped[key] {
+			continue
+		}
+
+		gotChildren, ok := got.entries[key]
+		if !ok {
+			t.Errorf("%s: entry %s disappeared", profileName, key)
+			continue
+		}
+
+		if !slices.Equal(gotChildren, wantChildren) {
+			t.Errorf("%s: entry %s has children %v, retrieved %v", profileName, key, gotChildren, wantChildren)
+		}
+	}
+
+	for key, children := range got.entries {
+		if i, ok := firstUnsorted(children); ok {
+			t.Errorf("%s: entry %s children are not alphabetical: %s before %s", profileName, key, children[i-1], children[i])
+		}
+	}
+}
+
+// firstUnsorted reports the first position whose tag sorts before its
+// predecessor.
+func firstUnsorted(tags []string) (int, bool) {
+	for i := 1; i < len(tags); i++ {
+		if tags[i-1] > tags[i] {
+			return i, true
+		}
+	}
+
+	return 0, false
+}
+
+// compressRuns turns ["a","a","b"] into ["a","b"].
+func compressRuns(tags []string) []string {
+	var out []string
+
+	for _, tag := range tags {
+		if len(out) == 0 || out[len(out)-1] != tag {
+			out = append(out, tag)
+		}
+	}
+
+	return out
+}
+
+// shapedProfile is the part of a profile the fidelity assertions compare: the
+// top-level element sequence and, for every named entry, its child sequence.
+type shapedProfile struct {
+	tags    []string
+	entries map[string][]string // "<section>/<entry name>" -> child tags
+}
+
+// shapeProfile reads a profile document into a shapedProfile. Entries are keyed
+// by section and name because saving reorders them.
+func shapeProfile(t *testing.T, label, doc string) shapedProfile {
+	t.Helper()
+
+	shape := shapedProfile{entries: make(map[string][]string)}
+	dec := xml.NewDecoder(strings.NewReader(doc))
+
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			t.Fatalf("%s: no <Profile> root", label)
+		}
+		if err != nil {
+			t.Fatalf("%s: parse root: %v", label, err)
+		}
+		if se, ok := tok.(xml.StartElement); ok && se.Name.Local == "Profile" {
+			break
+		}
+	}
+
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			return shape
+		}
+		if err != nil {
+			t.Fatalf("%s: parse: %v", label, err)
+		}
+
+		switch t2 := tok.(type) {
+		case xml.StartElement:
+			tag := t2.Name.Local
+			shape.tags = append(shape.tags, tag)
+
+			nameField, ok := sectionNameField[tag]
+			if !ok {
+				if err := dec.Skip(); err != nil {
+					t.Fatalf("%s/%s: skip: %v", label, tag, err)
+				}
+
+				continue
+			}
+
+			name, children := shapeEntry(t, label, tag, nameField, t2, dec)
+			shape.entries[tag+"/"+name] = children
+		case xml.EndElement:
+			return shape
+		}
+	}
+}
+
+// shapeEntry returns an entry's name and the tags of its children, in order.
+func shapeEntry(t *testing.T, label, section, nameField string, se xml.StartElement, dec *xml.Decoder) (string, []string) {
+	t.Helper()
+
+	var entry struct {
+		Inner []byte `xml:",innerxml"`
+	}
+	if err := dec.DecodeElement(&entry, &se); err != nil {
+		t.Fatalf("%s/%s: decode entry: %v", label, section, err)
+	}
+
+	var (
+		name     string
+		children []string
+	)
+
+	inner := xml.NewDecoder(bytes.NewReader(entry.Inner))
+
+	for {
+		tok, err := inner.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("%s/%s: parse entry: %v", label, section, err)
+		}
+
+		child, ok := tok.(xml.StartElement)
+		if !ok {
+			continue
+		}
+
+		children = append(children, child.Name.Local)
+
+		if child.Name.Local == nameField {
+			if err := inner.DecodeElement(&name, &child); err != nil {
+				t.Fatalf("%s/%s: decode %s: %v", label, section, nameField, err)
+			}
+
+			continue
+		}
+
+		if err := inner.Skip(); err != nil {
+			t.Fatalf("%s/%s: skip %s: %v", label, section, child.Name.Local, err)
+		}
+	}
+
+	return name, children
+}
+
+// readFixture reads a fixture and normalises its line endings to LF. The
+// writer always emits LF, so the comparison must not depend on how the checkout
+// materialised the fixture (a Windows working tree is CRLF).
+func readFixture(t *testing.T, path string) []byte {
+	t.Helper()
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read fixture %s: %v", path, err)
+	}
+
+	return bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
+}
+
+// collectEntryNames records the field and Apex class names a profile references.
+func collectEntryNames(t *testing.T, label string, raw []byte, fields, classes map[string]bool) {
+	t.Helper()
+
+	dec := xml.NewDecoder(bytes.NewReader(raw))
+
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			return
+		}
+
+		if err != nil {
+			t.Fatalf("parse %s: %v", label, err)
+		}
+
+		se, ok := tok.(xml.StartElement)
+		if !ok {
+			continue
+		}
+
+		if se.Name.Local != "field" && se.Name.Local != "apexClass" {
+			continue
+		}
+
+		var value string
+
+		if err := dec.DecodeElement(&value, &se); err != nil {
+			t.Fatalf("decode %s/%s: %v", label, se.Name.Local, err)
+		}
+
+		if se.Name.Local == "field" {
+			fields[value] = true
+		} else {
+			classes[value] = true
+		}
+	}
+}
+
+// firstDifference names the line where two XML documents start to disagree.
+func firstDifference(want, got string) string {
+	wantLines := strings.Split(want, "\n")
+	gotLines := strings.Split(got, "\n")
+
+	for i := 0; i < len(wantLines) && i < len(gotLines); i++ {
+		if wantLines[i] != gotLines[i] {
+			return fmt.Sprintf("line %d: want %q, got %q", i+1, wantLines[i], gotLines[i])
+		}
+	}
+
+	return fmt.Sprintf("line %d: one document ended first", min(len(wantLines), len(gotLines))+1)
+}
+
+func TestRenderEntrySortsChildrenAlphabetically(t *testing.T) {
+	out, err := marshalEntry("fieldPermissions", "Account.Name", graph.EdgeProperties{
+		Readable: boolPtr(true),
+		Editable: boolPtr(false),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := strings.Join(childTags(t, string(out)), ",")
+
+	if got != "editable,field,readable" {
+		t.Errorf("expected alphabetical child order, got %s", got)
+	}
+}
+
+func TestUnknownReportDeduplicates(t *testing.T) {
+	report := newUnknownReport()
+	report.add("userPermissions", "futureFlag")
+	report.add("userPermissions", "futureFlag")
+	report.add("userPermissions", "futureFlag")
+	report.add("objectPermissions", "futurePermission")
+
+	var out bytes.Buffer
+
+	report.print(&out)
+
+	want := "warning: objectPermissions: preserving unknown element <futurePermission> in 1 entry\n" +
+		"warning: userPermissions: preserving unknown element <futureFlag> in 3 entries\n"
+
+	if out.String() != want {
+		t.Errorf("report = %q, want %q", out.String(), want)
+	}
+}
+
+func TestNormalizeProfileCountsUnknownChildrenOnce(t *testing.T) {
+	rawXML := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <userPermissions>
+        <enabled>true</enabled>
+        <futureFlag>true</futureFlag>
+        <name>First</name>
+    </userPermissions>
+    <userPermissions>
+        <enabled>true</enabled>
+        <futureFlag>true</futureFlag>
+        <name>Second</name>
+    </userPermissions>
+</Profile>`
+
+	g := graph.NewGraph()
+	ms := schema.NewMasterSchema()
+	ms.Add("userPermissions", "First")
+	ms.Add("userPermissions", "Second")
+	g.SetMasterSchema(ms)
+
+	p, err := g.AddProfile("Admin", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p.RawXML = rawXML
+
+	for _, name := range []string{"First", "Second"} {
+		mn := g.GetOrCreateMetadataNode(graph.MetaTypeUserPerm, name)
+		g.AddEdge(p, mn, graph.EdgeProperties{Enabled: boolPtr(true)})
+	}
+
+	report := newUnknownReport()
+	if _, err := NormalizeProfile(p, g, report); err != nil {
+		t.Fatalf("NormalizeProfile: %v", err)
+	}
+
+	var out bytes.Buffer
+
+	report.print(&out)
+
+	want := "warning: userPermissions: preserving unknown element <futureFlag> in 2 entries\n"
+
+	if out.String() != want {
+		t.Errorf("report = %q, want %q", out.String(), want)
+	}
+}
+
+func TestRenderEntryPreservesUnknownChild(t *testing.T) {
+	raw := `<objectPermissions>
+        <allowCreate>true</allowCreate>
+        <futurePermission>true</futurePermission>
+        <object>Account</object>
+        <viewAllRecords>false</viewAllRecords>
+    </objectPermissions>`
+
+	out, err := renderEntry("objectPermissions", "Account", graph.EdgeProperties{
+		AllowCreate: boolPtr(true),
+		ViewAll:     boolPtr(false),
+	}, raw, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := strings.Join(childTags(t, string(out)), ",")
+
+	if got != "allowCreate,allowDelete,allowEdit,allowRead,futurePermission,modifyAllRecords,object,viewAllRecords" {
+		t.Errorf("expected unknown child preserved in alphabetical position, got %s:\n%s", got, out)
+	}
+
+	if !strings.Contains(string(out), "<futurePermission>true</futurePermission>") {
+		t.Errorf("unknown child value was not preserved verbatim:\n%s", out)
+	}
+}
+
+func TestProfileBlocksSortTopLevelElements(t *testing.T) {
+	rawXML := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <userLicense>Salesforce</userLicense>
+    <classAccesses>
+        <apexClass>MyClass</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <custom>false</custom>
+    <loginIpRanges>
+        <startAddress>10.0.0.0</startAddress>
+    </loginIpRanges>
+    <description>Fixture profile</description>
+</Profile>`
+
+	ms := schema.NewMasterSchema()
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+
+	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	p.RawXML = rawXML
+	p.UserLicense = "Salesforce"
+	p.IsCustom = false
+	p.HasCustomTag = true
+	p.Description = "Fixture profile"
+
+	classNode := g.GetOrCreateMetadataNode(graph.MetaTypeApexClass, "MyClass")
+	g.AddEdge(p, classNode, graph.EdgeProperties{Enabled: boolPtr(true)})
+
+	out := string(mustNormalize(t, p, g))
+	got := strings.Join(childTags(t, out), ",")
+
+	if got != "classAccesses,custom,description,loginIpRanges,userLicense" {
+		t.Errorf("expected alphabetical top-level order, got %s:\n%s", got, out)
+	}
+}
+
+func TestNormalizeProfilePreservesEmptyDescription(t *testing.T) {
+	dir := t.TempDir()
+	rawXML := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <custom>false</custom>
+    <description></description>
+    <userLicense>Salesforce</userLicense>
+</Profile>`
+
+	dst := filepath.Join(dir, "profiles", "Empty.profile-meta.xml")
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(dst, []byte(rawXML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := schema.LoadProfiles(dir)
+	if err != nil {
+		t.Fatalf("load project: %v", err)
+	}
+
+	profiles := g.Profiles()
+	if len(profiles) != 1 {
+		t.Fatalf("expected 1 profile, got %d", len(profiles))
+	}
+
+	got := string(mustNormalize(t, profiles[0], g))
+
+	if !strings.Contains(got, "<description></description>") {
+		t.Errorf("empty <description> was dropped:\n%s", got)
+	}
+
+	if !strings.Contains(got, "<userLicense>Salesforce</userLicense>") {
+		t.Errorf("userLicense value was dropped:\n%s", got)
+	}
+}
+
+func TestNormalizeProfileViewAllFieldsPreservedNotBackfilled(t *testing.T) {
+	rawXML := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <objectPermissions>
+        <allowCreate>false</allowCreate>
+        <object>Account</object>
+        <viewAllFields>true</viewAllFields>
+        <viewAllRecords>false</viewAllRecords>
+    </objectPermissions>
+</Profile>`
+
+	ms := schema.NewMasterSchema()
+	ms.Add("objectPermissions", "Account")
+	ms.Add("objectPermissions", "Contact")
+
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+
+	p, _ := g.AddProfile("Admin", "Admin.profile-meta.xml")
+	p.RawXML = rawXML
+
+	account := g.GetOrCreateMetadataNode(graph.MetaTypeObject, "Account")
+	g.AddEdge(p, account, graph.EdgeProperties{AllowCreate: boolPtr(false), ViewAll: boolPtr(false), ViewAllFields: boolPtr(true)})
+
+	out := string(mustNormalize(t, p, g))
+
+	if !strings.Contains(out, "<object>Account</object>\n        <viewAllFields>true</viewAllFields>") {
+		t.Errorf("viewAllFields from the source entry must be preserved:\n%s", out)
+	}
+
+	backfilled := out[strings.Index(out, "<object>Contact</object>"):]
+
+	if strings.Contains(backfilled, "viewAllFields") {
+		t.Errorf("backfilled entries must not gain viewAllFields:\n%s", backfilled)
+	}
+}
+
+// childTags lists the direct child element names of the single element in doc.
+func childTags(t *testing.T, doc string) []string {
+	t.Helper()
+
+	root := struct {
+		XMLName xml.Name
+		Inner   []byte `xml:",innerxml"`
+	}{}
+
+	if err := xml.Unmarshal([]byte(doc), &root); err != nil {
+		t.Fatalf("parse %q: %v", doc, err)
+	}
+
+	dec := xml.NewDecoder(bytes.NewReader(root.Inner))
+
+	var tags []string
+
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			return tags
+		}
+
+		if err != nil {
+			t.Fatalf("parse children: %v", err)
+		}
+
+		if se, ok := tok.(xml.StartElement); ok {
+			tags = append(tags, se.Name.Local)
+			dec.Skip()
+		}
 	}
 }

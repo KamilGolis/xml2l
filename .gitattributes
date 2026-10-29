@@ -1,0 +1,7 @@
+.gitattributes text eol=lf
+# Salesforce metadata is LF on disk and the fidelity fixtures are compared byte
+# for byte against the writer's output, which always emits LF. Pin the checkout
+# so a Windows working tree cannot turn those fixtures into CRLF.
+*.xml text eol=lf
+# Go tooling expects LF: gofmt flags every CRLF file as unformatted.
+*.go text eol=lf

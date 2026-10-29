@@ -45,6 +45,47 @@ func CrossReference(g *graph.SalesforceGraph, repoFiles map[string]map[string]bo
 		}
 	}
 
+	// Ghost references never become nodes, so a profile-only reference to
+	// metadata with no file has to be read from the profiles themselves.
+	reported := make(map[string]bool, len(xr.MissingFiles))
+
+	for _, me := range xr.MissingFiles {
+		reported[me.MetaType+"\x00"+me.Name] = true
+	}
+
+	seenGhosts := make(map[GhostRef]bool)
+
+	for _, p := range g.Profiles() {
+		for _, ghost := range p.Ghosts {
+			metaType := string(ghost.MetaType)
+
+			if metaTypeSkipList[metaType] {
+				continue
+			}
+
+			// Attribution is per profile: a ghost is dropped from this
+			// profile's saved output, even when another profile drops it too.
+			ref := GhostRef{Profile: p.Name, MetaType: metaType, Name: ghost.Name}
+			if !seenGhosts[ref] {
+				seenGhosts[ref] = true
+				xr.Ghosts = append(xr.Ghosts, ref)
+			}
+
+			key := metaType + "\x00" + ghost.Name
+			if reported[key] {
+				continue
+			}
+
+			reported[key] = true
+
+			xr.MissingFiles = append(xr.MissingFiles, RepoEntry{
+				MetaType:     metaType,
+				Name:         ghost.Name,
+				ExpectedPath: expectedPath(metaType, ghost.Name),
+			})
+		}
+	}
+
 	// Direction 2: filesystem → graph — find files with no matching metadata node.
 	for metaType, entries := range repoFiles {
 		if metaTypeSkipList[metaType] {
@@ -68,6 +109,18 @@ func CrossReference(g *graph.SalesforceGraph, repoFiles map[string]map[string]bo
 		}
 
 		return xr.MissingFiles[i].Name < xr.MissingFiles[j].Name
+	})
+
+	sort.Slice(xr.Ghosts, func(i, j int) bool {
+		if xr.Ghosts[i].MetaType != xr.Ghosts[j].MetaType {
+			return xr.Ghosts[i].MetaType < xr.Ghosts[j].MetaType
+		}
+
+		if xr.Ghosts[i].Name != xr.Ghosts[j].Name {
+			return xr.Ghosts[i].Name < xr.Ghosts[j].Name
+		}
+
+		return xr.Ghosts[i].Profile < xr.Ghosts[j].Profile
 	})
 
 	sort.Slice(xr.Unreferenced, func(i, j int) bool {
