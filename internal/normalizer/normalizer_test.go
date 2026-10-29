@@ -65,7 +65,7 @@ func TestMarshalEntry(t *testing.T) {
 	t.Run("class access", func(t *testing.T) {
 		enabled := true
 		p := graph.EdgeProperties{Enabled: &enabled}
-		out, err := marshalEntry("classAccesses", "MyClass", p)
+		out, err := renderEntry("classAccesses", "MyClass", p, "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -82,7 +82,7 @@ func TestMarshalEntry(t *testing.T) {
 	t.Run("field permission backfill false", func(t *testing.T) {
 		// Default (false) values — simulates a backfilled entry.
 		p := DefaultEdgeProperties(graph.MetaTypeField)
-		out, err := marshalEntry("fieldPermissions", "Account.Revenue__c", p)
+		out, err := renderEntry("fieldPermissions", "Account.Revenue__c", p, "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -98,7 +98,7 @@ func TestMarshalEntry(t *testing.T) {
 
 	t.Run("tab visibility with string value", func(t *testing.T) {
 		p := graph.EdgeProperties{Visibility: strPtr("DefaultOn")}
-		out, err := marshalEntry("tabVisibilities", "standard-Account", p)
+		out, err := renderEntry("tabVisibilities", "standard-Account", p, "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -115,7 +115,7 @@ func TestMarshalEntry(t *testing.T) {
 			ModifyAll: &[]bool{false}[0], ViewAll: &[]bool{false}[0],
 		}
 
-		out, err := marshalEntry("objectPermissions", "Account", p)
+		out, err := renderEntry("objectPermissions", "Account", p, "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -132,7 +132,7 @@ func TestMarshalEntry(t *testing.T) {
 	t.Run("page access", func(t *testing.T) {
 		enabled := true
 		p := graph.EdgeProperties{Enabled: &enabled}
-		out, err := marshalEntry("pageAccesses", "MyPage", p)
+		out, err := renderEntry("pageAccesses", "MyPage", p, "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1582,10 +1582,10 @@ func firstDifference(want, got string) string {
 }
 
 func TestRenderEntrySortsChildrenAlphabetically(t *testing.T) {
-	out, err := marshalEntry("fieldPermissions", "Account.Name", graph.EdgeProperties{
+	out, err := renderEntry("fieldPermissions", "Account.Name", graph.EdgeProperties{
 		Readable: boolPtr(true),
 		Editable: boolPtr(false),
-	})
+	}, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1689,6 +1689,87 @@ func TestRenderEntryPreservesUnknownChild(t *testing.T) {
 
 	if !strings.Contains(string(out), "<futurePermission>true</futurePermission>") {
 		t.Errorf("unknown child value was not preserved verbatim:\n%s", out)
+	}
+}
+
+func TestEntryName(t *testing.T) {
+	cases := []struct {
+		name  string
+		body  string
+		field string
+		want  string
+	}{
+		{
+			name:  "plain",
+			body:  "<classAccesses><apexClass>MyClass</apexClass><enabled>true</enabled></classAccesses>",
+			field: "apexClass",
+			want:  "MyClass",
+		},
+		{
+			name:  "surrounding whitespace",
+			body:  "<fieldPermissions>\n    <field> Account.Name </field>\n</fieldPermissions>",
+			field: "field",
+			want:  "Account.Name",
+		},
+		{
+			name:  "name field is not the first child",
+			body:  "<layoutAssignments><layout>Account-Layout</layout><recordType>RT</recordType></layoutAssignments>",
+			field: "layout",
+			want:  "Account-Layout",
+		},
+		{
+			name:  "no name field",
+			body:  "<classAccesses><enabled>true</enabled></classAccesses>",
+			field: "apexClass",
+			want:  "",
+		},
+		{
+			name:  "empty name field",
+			body:  "<classAccesses><apexClass></apexClass></classAccesses>",
+			field: "apexClass",
+			want:  "",
+		},
+		{
+			name:  "self-closing name field",
+			body:  "<classAccesses><apexClass/></classAccesses>",
+			field: "apexClass",
+			want:  "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := entryName(tc.body, tc.field); got != tc.want {
+				t.Errorf("entryName = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildRawEntryIndexSkipsUnnamedEntries(t *testing.T) {
+	raw := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <classAccesses>
+        <apexClass></apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>Kept</apexClass>
+        <enabled>false</enabled>
+    </classAccesses>
+</Profile>`
+
+	idx, err := buildRawEntryIndex(raw)
+	if err != nil {
+		t.Fatalf("buildRawEntryIndex: %v", err)
+	}
+
+	if _, ok := idx["classAccesses"][""]; ok {
+		t.Error("entry without a name must not be indexed")
+	}
+
+	if _, ok := idx["classAccesses"]["Kept"]; !ok {
+		t.Error("named entry missing from the index")
 	}
 }
 

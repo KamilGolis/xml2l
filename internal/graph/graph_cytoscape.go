@@ -56,6 +56,35 @@ type CytoscapeEdgeData struct {
 // ToCytoscapeJSON serializes the graph to the Cytoscape.js elements format.
 // It caps metadata nodes at maxPerType per MetaType, aggregating excess nodes
 // into summary entries. All permission properties are serialized on edges.
+// newCytoscapeEdge maps one graph edge to the cytoscape representation. Both
+// exporters use it, so a new permission property has one place to be added
+// instead of one per exporter.
+func newCytoscapeEdge(id string, e *Edge) CytoscapeEdge {
+	return CytoscapeEdge{
+		Data: CytoscapeEdgeData{
+			ID:            id,
+			Source:        "Profile:" + e.ProfileNode.Name,
+			Target:        string(e.MetadataNode.MetaType) + ":" + e.MetadataNode.Name,
+			MetaType:      string(e.MetadataNode.MetaType),
+			Enabled:       e.Properties.Enabled,
+			Readable:      e.Properties.Readable,
+			Editable:      e.Properties.Editable,
+			AllowCreate:   e.Properties.AllowCreate,
+			AllowDelete:   e.Properties.AllowDelete,
+			AllowRead:     e.Properties.AllowRead,
+			AllowEdit:     e.Properties.AllowEdit,
+			ModifyAll:     e.Properties.ModifyAll,
+			ViewAll:       e.Properties.ViewAll,
+			ViewAllFields: e.Properties.ViewAllFields,
+			Default:       e.Properties.Default,
+			Visible:       e.Properties.Visible,
+			Hidden:        e.Properties.Hidden,
+			Visibility:    e.Properties.Visibility,
+			RecordType:    e.Properties.RecordType,
+		},
+	}
+}
+
 func (g *SalesforceGraph) ToCytoscapeJSON(maxPerType int) *CytoscapeGraph {
 	cg := &CytoscapeGraph{
 		Nodes: make([]CytoscapeNode, 0),
@@ -142,31 +171,7 @@ func (g *SalesforceGraph) ToCytoscapeJSON(maxPerType int) *CytoscapeGraph {
 			continue
 		}
 
-		edge := CytoscapeEdge{
-			Data: CytoscapeEdgeData{
-				ID:            fmt.Sprintf("e%d", edgeIndex),
-				Source:        srcID,
-				Target:        tgtID,
-				MetaType:      string(e.MetadataNode.MetaType),
-				Enabled:       e.Properties.Enabled,
-				Readable:      e.Properties.Readable,
-				Editable:      e.Properties.Editable,
-				AllowCreate:   e.Properties.AllowCreate,
-				AllowDelete:   e.Properties.AllowDelete,
-				AllowRead:     e.Properties.AllowRead,
-				AllowEdit:     e.Properties.AllowEdit,
-				ModifyAll:     e.Properties.ModifyAll,
-				ViewAll:       e.Properties.ViewAll,
-				ViewAllFields: e.Properties.ViewAllFields,
-				Default:       e.Properties.Default,
-				Visible:       e.Properties.Visible,
-				Hidden:        e.Properties.Hidden,
-				Visibility:    e.Properties.Visibility,
-				RecordType:    e.Properties.RecordType,
-			},
-		}
-
-		cg.Edges = append(cg.Edges, edge)
+		cg.Edges = append(cg.Edges, newCytoscapeEdge(fmt.Sprintf("e%d", edgeIndex), e))
 		edgeIndex++
 	}
 

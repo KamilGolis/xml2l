@@ -3,6 +3,7 @@ package graph
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -68,6 +69,40 @@ func TestJSONExporter(t *testing.T) {
 					t.Error("expected editable=false on field edge")
 				}
 			}
+		}
+	}
+}
+
+func TestCytoscapeExportersAgreeOnEdges(t *testing.T) {
+	g := newTestGraph()
+
+	cg := g.ToCytoscapeJSON(0)
+
+	var buf bytes.Buffer
+	if err := (JSONExporter{}).Export(g, &buf); err != nil {
+		t.Fatalf("JSONExporter.Export failed: %v", err)
+	}
+
+	var exported struct {
+		Edges []CytoscapeEdge `json:"edges"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &exported); err != nil {
+		t.Fatalf("JSON output not valid JSON: %v", err)
+	}
+
+	if len(cg.Edges) != len(exported.Edges) {
+		t.Fatalf("edge counts differ: cytoscape %d, json export %d", len(cg.Edges), len(exported.Edges))
+	}
+
+	for i := range cg.Edges {
+		// Edge IDs differ only in how each exporter numbers them; with every
+		// node included both should agree here too.
+		if cg.Edges[i].Data.ID != exported.Edges[i].Data.ID {
+			t.Errorf("edge %d id: cytoscape %q, json export %q", i, cg.Edges[i].Data.ID, exported.Edges[i].Data.ID)
+		}
+
+		if !reflect.DeepEqual(cg.Edges[i].Data, exported.Edges[i].Data) {
+			t.Errorf("edge %d data differs:\n cytoscape %+v\n json export %+v", i, cg.Edges[i].Data, exported.Edges[i].Data)
 		}
 	}
 }
