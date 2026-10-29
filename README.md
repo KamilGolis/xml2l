@@ -63,6 +63,34 @@ instead of being normalized, so it keeps the property order of the file (only
 its indentation is normalized). Every other entry in that profile is still
 sorted.
 
+`--entry-point-classes` (save only) rewrites `classAccesses` so a profile grants
+Apex class access only to classes Salesforce invokes on behalf of the running
+user:
+
+| Entry point | Detected from |
+|---|---|
+| Visualforce controller or extension | `controller` / `extensions` on `.page` and `.component` files |
+| Aura controller | `controller` on `.cmp` / `.app` / `.evt` |
+| LWC controller | `import … from '@salesforce/apex/Class.method'` |
+| REST endpoint | `@RestResource` on the class |
+| SOAP endpoint | a `webservice` method |
+| Flow invocable | `<apexClass>` in a flow's action call |
+
+Every other `classAccesses` entry is removed and a required class missing from
+the profile is added with `enabled: true`; other sections are untouched. A class
+carrying `@AuraEnabled` or `@InvocableMethod` but referenced from nowhere is not
+required, and neither are trigger handlers — triggers run in system context.
+Excluded entries are never pruned. `--dry-run` prints the per-profile change and
+writes nothing:
+
+```
+Admin: 44 enabled → 5, removed 39, added 0
+```
+
+Pruning is intentionally not retrieve-faithful for class access: the next
+`sf project retrieve` restores the grants stored in the org (see
+[ADR-0004](docs/adr/0004-entry-point-class-access.md)).
+
 ```bash
 # Diff all profiles — see what each profile is missing relative to others
 ./xml2l profile diff --path ./my-sfdx-project/main/default
@@ -84,6 +112,9 @@ sorted.
 
 # Normalize profiles with org schema cross-check against specific org and exclude specific metadata
 ./xml2l profile save --path ./my-sfdx-project/main/default --use-org-schema --org myOrg --exclude "chatter"
+
+# Keep class access to Apex entry points only — report the change first
+./xml2l profile save --path ./my-sfdx-project/main/default --entry-point-classes --dry-run
 ```
 
 ### Example output
