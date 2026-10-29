@@ -77,10 +77,18 @@ func (e MetadataEntry) ToEdgeProperties() graph.EdgeProperties {
 func BoolPtr(b bool) *bool    { return &b }
 func StrPtr(s string) *string { return &s }
 
+// decodeSink receives what decoding one entry produced: the entry itself and,
+// for sections whose targets come from ground truth, the names with no file in
+// the project. Decoders that produce no ghosts leave ghosts nil.
+type decodeSink struct {
+	entries *[]MetadataEntry
+	ghosts  *[]string
+}
+
 // sectionDecoder decodes ONE entry element of a known section type.
 // se is the entry's StartElement (e.g. <classAccesses>).
 // The decoder is positioned right after the StartElement.
-type sectionDecoder func(*xml.Decoder, *xml.StartElement, scanner.GroundTruth, *[]MetadataEntry, *[]string) error
+type sectionDecoder func(*xml.Decoder, *xml.StartElement, scanner.GroundTruth, *decodeSink) error
 
 var sectionFuncs = map[string]sectionDecoder{}
 
@@ -198,7 +206,7 @@ func Decode(r io.Reader, gt scanner.GroundTruth) (*Profile, error) {
 						ghosts  []string
 					)
 
-					if err := fn(decoder, &t, gt, &entries, &ghosts); err != nil {
+					if err := fn(decoder, &t, gt, &decodeSink{entries: &entries, ghosts: &ghosts}); err != nil {
 						return nil, fmt.Errorf("%s: %w", tag, err)
 					}
 
@@ -251,6 +259,6 @@ func skipElement(decoder *xml.Decoder) error {
 	}
 }
 
-func decodeRawEntry(decoder *xml.Decoder, _ *xml.StartElement, _ scanner.GroundTruth, _ *[]MetadataEntry, _ *[]string) error {
+func decodeRawEntry(decoder *xml.Decoder, _ *xml.StartElement, _ scanner.GroundTruth, _ *decodeSink) error {
 	return skipElement(decoder)
 }

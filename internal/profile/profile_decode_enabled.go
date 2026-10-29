@@ -53,7 +53,10 @@ type pageAccessEntry struct {
 	Enabled  bool   `xml:"enabled"`
 }
 
-func decodeClassAccesses(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, ghosts *[]string) error {
+func decodeClassAccesses(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, sink *decodeSink) error {
+	entries := sink.entries
+	ghosts := sink.ghosts
+
 	var entry classAccessEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {
@@ -75,7 +78,10 @@ func decodeClassAccesses(decoder *xml.Decoder, se *xml.StartElement, gt scanner.
 	return nil
 }
 
-func decodeAgentAccesses(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, ghosts *[]string) error {
+func decodeAgentAccesses(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, sink *decodeSink) error {
+	entries := sink.entries
+	ghosts := sink.ghosts
+
 	var entry agentAccessEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {
@@ -97,7 +103,9 @@ func decodeAgentAccesses(decoder *xml.Decoder, se *xml.StartElement, gt scanner.
 	return nil
 }
 
-func decodeNameEnabled(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, _ *[]string) error {
+func decodeNameEnabled(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, sink *decodeSink) error {
+	entries := sink.entries
+
 	var entry nameEnabledEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {
@@ -113,7 +121,9 @@ func decodeNameEnabled(decoder *xml.Decoder, se *xml.StartElement, gt scanner.Gr
 	return nil
 }
 
-func decodeFlowAccesses(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, _ *[]string) error {
+func decodeFlowAccesses(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, sink *decodeSink) error {
+	entries := sink.entries
+
 	var entry flowEnabledEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {
@@ -129,7 +139,9 @@ func decodeFlowAccesses(decoder *xml.Decoder, se *xml.StartElement, gt scanner.G
 	return nil
 }
 
-func decodeExtDataSource(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, _ *[]string) error {
+func decodeExtDataSource(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, sink *decodeSink) error {
+	entries := sink.entries
+
 	var entry extDataSourceEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {
@@ -145,7 +157,9 @@ func decodeExtDataSource(decoder *xml.Decoder, se *xml.StartElement, gt scanner.
 	return nil
 }
 
-func decodeGenComputingDef(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, _ *[]string) error {
+func decodeGenComputingDef(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, sink *decodeSink) error {
+	entries := sink.entries
+
 	var entry enhancedSummaryEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {
@@ -161,7 +175,9 @@ func decodeGenComputingDef(decoder *xml.Decoder, se *xml.StartElement, gt scanne
 	return nil
 }
 
-func decodeServicePresence(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, _ *[]string) error {
+func decodeServicePresence(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, sink *decodeSink) error {
+	entries := sink.entries
+
 	var entry servicePresenceEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {
@@ -177,7 +193,9 @@ func decodeServicePresence(decoder *xml.Decoder, se *xml.StartElement, gt scanne
 	return nil
 }
 
-func decodeUserPermissions(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, _ *[]string) error {
+func decodeUserPermissions(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, sink *decodeSink) error {
+	entries := sink.entries
+
 	var entry userPermEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {
@@ -193,7 +211,9 @@ func decodeUserPermissions(decoder *xml.Decoder, se *xml.StartElement, gt scanne
 	return nil
 }
 
-func decodePageAccesses(decoder *xml.Decoder, se *xml.StartElement, _ scanner.GroundTruth, entries *[]MetadataEntry, _ *[]string) error {
+func decodePageAccesses(decoder *xml.Decoder, se *xml.StartElement, _ scanner.GroundTruth, sink *decodeSink) error {
+	entries := sink.entries
+
 	var entry pageAccessEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {

@@ -65,7 +65,7 @@ func TestMarshalEntry(t *testing.T) {
 	t.Run("class access", func(t *testing.T) {
 		enabled := true
 		p := graph.EdgeProperties{Enabled: &enabled}
-		out, err := marshalEntry("classAccesses", "MyClass", p)
+		out, err := renderEntry("classAccesses", "MyClass", p, "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -82,7 +82,7 @@ func TestMarshalEntry(t *testing.T) {
 	t.Run("field permission backfill false", func(t *testing.T) {
 		// Default (false) values — simulates a backfilled entry.
 		p := DefaultEdgeProperties(graph.MetaTypeField)
-		out, err := marshalEntry("fieldPermissions", "Account.Revenue__c", p)
+		out, err := renderEntry("fieldPermissions", "Account.Revenue__c", p, "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -98,7 +98,7 @@ func TestMarshalEntry(t *testing.T) {
 
 	t.Run("tab visibility with string value", func(t *testing.T) {
 		p := graph.EdgeProperties{Visibility: strPtr("DefaultOn")}
-		out, err := marshalEntry("tabVisibilities", "standard-Account", p)
+		out, err := renderEntry("tabVisibilities", "standard-Account", p, "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -115,7 +115,7 @@ func TestMarshalEntry(t *testing.T) {
 			ModifyAll: &[]bool{false}[0], ViewAll: &[]bool{false}[0],
 		}
 
-		out, err := marshalEntry("objectPermissions", "Account", p)
+		out, err := renderEntry("objectPermissions", "Account", p, "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -132,7 +132,7 @@ func TestMarshalEntry(t *testing.T) {
 	t.Run("page access", func(t *testing.T) {
 		enabled := true
 		p := graph.EdgeProperties{Enabled: &enabled}
-		out, err := marshalEntry("pageAccesses", "MyPage", p)
+		out, err := renderEntry("pageAccesses", "MyPage", p, "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1582,10 +1582,10 @@ func firstDifference(want, got string) string {
 }
 
 func TestRenderEntrySortsChildrenAlphabetically(t *testing.T) {
-	out, err := marshalEntry("fieldPermissions", "Account.Name", graph.EdgeProperties{
+	out, err := renderEntry("fieldPermissions", "Account.Name", graph.EdgeProperties{
 		Readable: boolPtr(true),
 		Editable: boolPtr(false),
-	})
+	}, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

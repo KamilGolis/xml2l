@@ -46,7 +46,9 @@ type tabVisibilityEntry struct {
 	Visibility string `xml:"visibility"`
 }
 
-func decodeAppVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, _ *[]string) error {
+func decodeAppVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, sink *decodeSink) error {
+	entries := sink.entries
+
 	var entry appVisibilityEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {
@@ -62,7 +64,9 @@ func decodeAppVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanne
 	return nil
 }
 
-func decodeCategoryGroupVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, _ *[]string) error {
+func decodeCategoryGroupVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, sink *decodeSink) error {
+	entries := sink.entries
+
 	var entry categoryGroupEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {
@@ -78,7 +82,9 @@ func decodeCategoryGroupVisibilities(decoder *xml.Decoder, se *xml.StartElement,
 	return nil
 }
 
-func decodeTabVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, _ *[]string) error {
+func decodeTabVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, sink *decodeSink) error {
+	entries := sink.entries
+
 	var entry tabVisibilityEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {
@@ -96,7 +102,9 @@ func decodeTabVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanne
 	return nil
 }
 
-func decodeLayoutAssignments(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, _ *[]string) error {
+func decodeLayoutAssignments(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, sink *decodeSink) error {
+	entries := sink.entries
+
 	var entry layoutEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {
@@ -112,7 +120,9 @@ func decodeLayoutAssignments(decoder *xml.Decoder, se *xml.StartElement, gt scan
 	return nil
 }
 
-func decodeObjectPermissions(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, _ *[]string) error {
+func decodeObjectPermissions(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, sink *decodeSink) error {
+	entries := sink.entries
+
 	var entry objectPermEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {
@@ -132,7 +142,9 @@ func decodeObjectPermissions(decoder *xml.Decoder, se *xml.StartElement, gt scan
 	return nil
 }
 
-func decodeRecordTypeVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, entries *[]MetadataEntry, _ *[]string) error {
+func decodeRecordTypeVisibilities(decoder *xml.Decoder, se *xml.StartElement, gt scanner.GroundTruth, sink *decodeSink) error {
+	entries := sink.entries
+
 	var entry recordTypeEntry
 
 	if err := decoder.DecodeElement(&entry, se); err != nil {

@@ -525,11 +525,6 @@ func entryChildren(sectionTag, name string, props graph.EdgeProperties) ([]entry
 	}
 }
 
-// marshalEntry renders one entry from graph properties alone.
-func marshalEntry(sectionTag, name string, props graph.EdgeProperties) ([]byte, error) {
-	return renderEntry(sectionTag, name, props, "", nil)
-}
-
 // renderEntry renders one entry, merging the properties modelled in the graph
 // with any property this build does not model that the source entry carried.
 // Unknown properties are preserved verbatim and reported on stderr so they can
