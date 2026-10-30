@@ -44,6 +44,12 @@ _Avoid_: canonical org, live org
 Alphabetical order by element name at both section and permission-property level — the order Salesforce itself writes on retrieve.
 _Avoid_: canonical order, sorted output
 
+**Entry-point class**:
+An Apex class Salesforce invokes on behalf of the running user — an Aura or LWC
+controller, a Visualforce controller or extension, a REST or SOAP endpoint, or a
+Flow invocable — and which therefore needs class access in a profile.
+_Avoid_: used class, referenced class, public class
+
 **Standalone value**:
 A profile-level section whose element carries a value rather than entries (`custom`, `description`, `userLicense`).
 _Avoid_: scalar, field

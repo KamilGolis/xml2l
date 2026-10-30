@@ -106,16 +106,17 @@ type OrgSchemaProvider interface {
 // SalesforceGraph is a bipartite graph of profile and metadata nodes with
 // indexed edges for fast lookup from either side.
 type SalesforceGraph struct {
-	ProfileNodes     map[string]*ProfileNode  // keyed by profile name
-	MetadataNodes    map[string]*MetadataNode // keyed by "MetaType:Name"
-	Edges            []*Edge
-	ProfileToEdges   map[*ProfileNode][]*Edge
-	MetaToEdges      map[*MetadataNode][]*Edge
-	masterSchema     MasterSchemaProvider
-	availableLayouts []string
-	orgSchema        OrgSchemaProvider
-	excludePatterns  []string
-	decodeErrors     []error
+	ProfileNodes      map[string]*ProfileNode  // keyed by profile name
+	MetadataNodes     map[string]*MetadataNode // keyed by "MetaType:Name"
+	Edges             []*Edge
+	ProfileToEdges    map[*ProfileNode][]*Edge
+	MetaToEdges       map[*MetadataNode][]*Edge
+	masterSchema      MasterSchemaProvider
+	availableLayouts  []string
+	orgSchema         OrgSchemaProvider
+	excludePatterns   []string
+	decodeErrors      []error
+	entryPointClasses map[string]bool
 }
 
 // SetDecodeErrors records the profiles that could not be decoded while loading.
@@ -294,6 +295,18 @@ func (g *SalesforceGraph) SetExcludePatterns(patterns []string) {
 // Returns nil when not set — the normalizer skips org filtering in that case.
 func (g *SalesforceGraph) OrgSchema() OrgSchemaProvider {
 	return g.orgSchema
+}
+
+// SetEntryPointClasses stores the Apex classes that need class access. A nil
+// map disables pruning; an empty non-nil map means no class is an entry point.
+func (g *SalesforceGraph) SetEntryPointClasses(classes map[string]bool) {
+	g.entryPointClasses = classes
+}
+
+// EntryPointClasses returns the required Apex classes, or nil when pruning is
+// off.
+func (g *SalesforceGraph) EntryPointClasses() map[string]bool {
+	return g.entryPointClasses
 }
 
 // ExcludePatterns returns the exclude patterns for normalization filtering.

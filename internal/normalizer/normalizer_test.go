@@ -65,7 +65,7 @@ func TestMarshalEntry(t *testing.T) {
 	t.Run("class access", func(t *testing.T) {
 		enabled := true
 		p := graph.EdgeProperties{Enabled: &enabled}
-		out, err := marshalEntry("classAccesses", "MyClass", p)
+		out, err := renderEntry("classAccesses", "MyClass", p, "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -82,7 +82,7 @@ func TestMarshalEntry(t *testing.T) {
 	t.Run("field permission backfill false", func(t *testing.T) {
 		// Default (false) values — simulates a backfilled entry.
 		p := DefaultEdgeProperties(graph.MetaTypeField)
-		out, err := marshalEntry("fieldPermissions", "Account.Revenue__c", p)
+		out, err := renderEntry("fieldPermissions", "Account.Revenue__c", p, "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -98,7 +98,7 @@ func TestMarshalEntry(t *testing.T) {
 
 	t.Run("tab visibility with string value", func(t *testing.T) {
 		p := graph.EdgeProperties{Visibility: strPtr("DefaultOn")}
-		out, err := marshalEntry("tabVisibilities", "standard-Account", p)
+		out, err := renderEntry("tabVisibilities", "standard-Account", p, "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -115,7 +115,7 @@ func TestMarshalEntry(t *testing.T) {
 			ModifyAll: &[]bool{false}[0], ViewAll: &[]bool{false}[0],
 		}
 
-		out, err := marshalEntry("objectPermissions", "Account", p)
+		out, err := renderEntry("objectPermissions", "Account", p, "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -132,7 +132,7 @@ func TestMarshalEntry(t *testing.T) {
 	t.Run("page access", func(t *testing.T) {
 		enabled := true
 		p := graph.EdgeProperties{Enabled: &enabled}
-		out, err := marshalEntry("pageAccesses", "MyPage", p)
+		out, err := renderEntry("pageAccesses", "MyPage", p, "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1447,8 +1447,8 @@ func shapeProfile(t *testing.T, label, doc string) shapedProfile {
 			tag := t2.Name.Local
 			shape.tags = append(shape.tags, tag)
 
-			nameField, ok := sectionNameField[tag]
-			if !ok {
+			nameField := graph.SectionNameField(tag)
+			if nameField == "" {
 				if err := dec.Skip(); err != nil {
 					t.Fatalf("%s/%s: skip: %v", label, tag, err)
 				}
@@ -1582,10 +1582,10 @@ func firstDifference(want, got string) string {
 }
 
 func TestRenderEntrySortsChildrenAlphabetically(t *testing.T) {
-	out, err := marshalEntry("fieldPermissions", "Account.Name", graph.EdgeProperties{
+	out, err := renderEntry("fieldPermissions", "Account.Name", graph.EdgeProperties{
 		Readable: boolPtr(true),
 		Editable: boolPtr(false),
-	})
+	}, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1689,6 +1689,248 @@ func TestRenderEntryPreservesUnknownChild(t *testing.T) {
 
 	if !strings.Contains(string(out), "<futurePermission>true</futurePermission>") {
 		t.Errorf("unknown child value was not preserved verbatim:\n%s", out)
+	}
+}
+
+func TestEntryName(t *testing.T) {
+	cases := []struct {
+		name  string
+		body  string
+		field string
+		want  string
+	}{
+		{
+			name:  "plain",
+			body:  "<classAccesses><apexClass>MyClass</apexClass><enabled>true</enabled></classAccesses>",
+			field: "apexClass",
+			want:  "MyClass",
+		},
+		{
+			name:  "surrounding whitespace",
+			body:  "<fieldPermissions>\n    <field> Account.Name </field>\n</fieldPermissions>",
+			field: "field",
+			want:  "Account.Name",
+		},
+		{
+			name:  "name field is not the first child",
+			body:  "<layoutAssignments><layout>Account-Layout</layout><recordType>RT</recordType></layoutAssignments>",
+			field: "layout",
+			want:  "Account-Layout",
+		},
+		{
+			name:  "no name field",
+			body:  "<classAccesses><enabled>true</enabled></classAccesses>",
+			field: "apexClass",
+			want:  "",
+		},
+		{
+			name:  "empty name field",
+			body:  "<classAccesses><apexClass></apexClass></classAccesses>",
+			field: "apexClass",
+			want:  "",
+		},
+		{
+			name:  "self-closing name field",
+			body:  "<classAccesses><apexClass/></classAccesses>",
+			field: "apexClass",
+			want:  "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := entryName(tc.body, tc.field); got != tc.want {
+				t.Errorf("entryName = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildRawEntryIndexSkipsUnnamedEntries(t *testing.T) {
+	raw := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <classAccesses>
+        <apexClass></apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>Kept</apexClass>
+        <enabled>false</enabled>
+    </classAccesses>
+</Profile>`
+
+	idx, err := buildRawEntryIndex(raw)
+	if err != nil {
+		t.Fatalf("buildRawEntryIndex: %v", err)
+	}
+
+	if _, ok := idx["classAccesses"][""]; ok {
+		t.Error("entry without a name must not be indexed")
+	}
+
+	if _, ok := idx["classAccesses"]["Kept"]; !ok {
+		t.Error("named entry missing from the index")
+	}
+}
+
+func TestEntryPointClassesPruneAndEnable(t *testing.T) {
+	rawXML := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <classAccesses>
+        <apexClass>Kept</apexClass>
+        <enabled>false</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>Dropped</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <userLicense>Salesforce</userLicense>
+</Profile>`
+
+	ms := schema.NewMasterSchema()
+	ms.Add("classAccesses", "Kept")
+	ms.Add("classAccesses", "Dropped")
+	ms.Add("classAccesses", "Backfilled")
+
+	g := graph.NewGraph()
+	g.SetMasterSchema(ms)
+
+	p, err := g.AddProfile("Admin", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p.RawXML = rawXML
+
+	for _, name := range []string{"Kept", "Dropped"} {
+		mn := g.GetOrCreateMetadataNode(graph.MetaTypeApexClass, name)
+		g.AddEdge(p, mn, graph.EdgeProperties{Enabled: boolPtr(name == "Dropped")})
+	}
+
+	g.SetEntryPointClasses(map[string]bool{"Kept": true})
+
+	out := string(mustNormalize(t, p, g))
+
+	if !strings.Contains(out, "<apexClass>Kept</apexClass>\n        <enabled>true</enabled>") {
+		t.Errorf("required class must be enabled:\n%s", out)
+	}
+
+	if strings.Contains(out, "Dropped") {
+		t.Errorf("non-required class must be removed:\n%s", out)
+	}
+
+	if strings.Contains(out, "Backfilled") {
+		t.Errorf("entry-point mode must not backfill other classes:\n%s", out)
+	}
+
+	if got := strings.Count(out, "<classAccesses>"); got != 1 {
+		t.Errorf("expected one classAccesses entry, got %d:\n%s", got, out)
+	}
+}
+
+func TestEntryPointClassesAddsClassMissingFromProfile(t *testing.T) {
+	g := graph.NewGraph()
+	g.SetMasterSchema(schema.NewMasterSchema())
+
+	p, err := g.AddProfile("Admin", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p.RawXML = `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <userLicense>Salesforce</userLicense>
+</Profile>`
+
+	g.SetEntryPointClasses(map[string]bool{"Needed": true})
+
+	out := string(mustNormalize(t, p, g))
+
+	if !strings.Contains(out, "<apexClass>Needed</apexClass>\n        <enabled>true</enabled>") {
+		t.Errorf("required class missing from the profile must be added enabled:\n%s", out)
+	}
+}
+
+func TestEntryPointClassesKeepsExcludedEntries(t *testing.T) {
+	rawXML := `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <classAccesses>
+        <apexClass>SkipThis</apexClass>
+        <enabled>true</enabled>
+        <futureProperty>1</futureProperty>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>KeepMe</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+</Profile>`
+
+	g := graph.NewGraph()
+	g.SetMasterSchema(schema.NewMasterSchema())
+
+	p, err := g.AddProfile("Admin", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p.RawXML = rawXML
+
+	for _, name := range []string{"SkipThis", "KeepMe"} {
+		mn := g.GetOrCreateMetadataNode(graph.MetaTypeApexClass, name)
+		g.AddEdge(p, mn, graph.EdgeProperties{Enabled: boolPtr(true)})
+	}
+
+	g.SetExcludePatterns([]string{"skip"})
+	g.SetEntryPointClasses(map[string]bool{"KeepMe": true})
+
+	out := string(mustNormalize(t, p, g))
+
+	if !strings.Contains(out, "<apexClass>SkipThis</apexClass>") {
+		t.Errorf("excluded entry must survive pruning:\n%s", out)
+	}
+
+	if !strings.Contains(out, "<futureProperty>1</futureProperty>") {
+		t.Errorf("excluded entry must be copied from the source:\n%s", out)
+	}
+}
+
+func TestClassAccessPlan(t *testing.T) {
+	g := graph.NewGraph()
+	g.SetMasterSchema(schema.NewMasterSchema())
+
+	admin, err := g.AddProfile("Admin", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"Kept", "Dropped"} {
+		mn := g.GetOrCreateMetadataNode(graph.MetaTypeApexClass, name)
+		g.AddEdge(admin, mn, graph.EdgeProperties{Enabled: boolPtr(true)})
+	}
+
+	other, err := g.AddProfile("Coupons", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mn := g.GetOrCreateMetadataNode(graph.MetaTypeApexClass, "Kept")
+	g.AddEdge(other, mn, graph.EdgeProperties{Enabled: boolPtr(false)})
+
+	g.SetEntryPointClasses(map[string]bool{"Kept": true, "Needed": true})
+
+	plan := ClassAccessPlan(g)
+
+	if len(plan) != 2 {
+		t.Fatalf("expected 2 profiles in the plan, got %d", len(plan))
+	}
+
+	// Profiles are sorted by name: Admin, then Coupons.
+	if plan[0].Profile != "Admin" || plan[0].Before != 2 || plan[0].After != 2 || plan[0].Removed != 1 || plan[0].Added != 1 {
+		t.Errorf("Admin change = %+v, want {Before:2 After:2 Removed:1 Added:1}", plan[0])
+	}
+
+	if plan[1].Profile != "Coupons" || plan[1].Before != 0 || plan[1].After != 2 || plan[1].Added != 2 {
+		t.Errorf("Coupons change = %+v, want {Before:0 After:2 Added:2}", plan[1])
 	}
 }
 

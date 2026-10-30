@@ -40,29 +40,7 @@ func (e JSONExporter) Export(g *SalesforceGraph, w io.Writer) error {
 	edges := make([]CytoscapeEdge, 0, len(g.Edges))
 
 	for i, e := range g.Edges {
-		edges = append(edges, CytoscapeEdge{
-			Data: CytoscapeEdgeData{
-				ID:            fmt.Sprintf("e%d", i),
-				Source:        "Profile:" + e.ProfileNode.Name,
-				Target:        string(e.MetadataNode.MetaType) + ":" + e.MetadataNode.Name,
-				MetaType:      string(e.MetadataNode.MetaType),
-				Enabled:       e.Properties.Enabled,
-				Readable:      e.Properties.Readable,
-				Editable:      e.Properties.Editable,
-				AllowCreate:   e.Properties.AllowCreate,
-				AllowDelete:   e.Properties.AllowDelete,
-				AllowRead:     e.Properties.AllowRead,
-				AllowEdit:     e.Properties.AllowEdit,
-				ModifyAll:     e.Properties.ModifyAll,
-				ViewAll:       e.Properties.ViewAll,
-				ViewAllFields: e.Properties.ViewAllFields,
-				Default:       e.Properties.Default,
-				Visible:       e.Properties.Visible,
-				Hidden:        e.Properties.Hidden,
-				Visibility:    e.Properties.Visibility,
-				RecordType:    e.Properties.RecordType,
-			},
-		})
+		edges = append(edges, newCytoscapeEdge(fmt.Sprintf("e%d", i), e))
 	}
 
 	out := struct {

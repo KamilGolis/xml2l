@@ -13,6 +13,7 @@ import (
 	"xml2l/internal/normalizer"
 	"xml2l/internal/orgschema"
 	reportpkg "xml2l/internal/report"
+	"xml2l/internal/scanner"
 	"xml2l/internal/schema"
 )
 
@@ -159,6 +160,8 @@ func newSaveCmd() *cobra.Command {
 	useOrgSchema := false
 	orgFlag := ""
 	excludeFlag := ""
+	entryPointClasses := false
+	dryRun := false
 	cmd := &cobra.Command{
 		Use:   "save",
 		Short: "Normalize and save profile changes to disk",
@@ -166,6 +169,10 @@ func newSaveCmd() *cobra.Command {
 			projectPath, _ := cmd.Flags().GetString("path")
 			if projectPath == "" {
 				return fmt.Errorf("required flag --path / -p is missing")
+			}
+
+			if dryRun && !entryPointClasses {
+				return fmt.Errorf("--dry-run requires --entry-point-classes")
 			}
 
 			g, err := schema.LoadProfiles(projectPath)
@@ -204,8 +211,38 @@ func newSaveCmd() *cobra.Command {
 			// not a usage error, so stop repeating the flag list.
 			cmd.SilenceUsage = true
 
+			var classAccessPlan []normalizer.ClassAccessChange
+
+			if entryPointClasses {
+				usage, err := scanner.ScanApexUsage(projectPath)
+				if err != nil {
+					return err
+				}
+
+				for _, warning := range usage.Warnings {
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning)
+				}
+
+				g.SetEntryPointClasses(usage.Required)
+				classAccessPlan = normalizer.ClassAccessPlan(g)
+			}
+
+			if dryRun {
+				for _, change := range classAccessPlan {
+					fmt.Fprintf(cmd.ErrOrStderr(), "%s: %d enabled → %d, removed %d, added %d\n",
+						change.Profile, change.Before, change.After, change.Removed, change.Added)
+				}
+
+				return nil
+			}
+
 			if err := normalizer.WriteProfiles(g); err != nil {
 				return err
+			}
+
+			for _, change := range classAccessPlan {
+				fmt.Fprintf(cmd.ErrOrStderr(), "%s: %d enabled → %d, removed %d, added %d\n",
+					change.Profile, change.Before, change.After, change.Removed, change.Added)
 			}
 
 			// A profile that failed to decode was skipped by the loader and
@@ -223,21 +260,27 @@ func newSaveCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&useOrgSchema, "use-org-schema", "s", false, "Cross-check metadata against Salesforce org schema before saving")
 	cmd.Flags().StringVarP(&orgFlag, "org", "o", "", "Salesforce org alias (default: SF CLI default org)")
 	cmd.Flags().StringVarP(&excludeFlag, "exclude", "e", "", "Comma-separated case-insensitive prefixes; matching entries skip normalization and preserve original XML (requires --use-org-schema)")
+	cmd.Flags().BoolVar(&entryPointClasses, "entry-point-classes", false, "Keep class access only for Apex classes Salesforce invokes on behalf of the user (Aura/LWC, Visualforce, REST/SOAP, Flow)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Report what --entry-point-classes would change without writing")
 	return cmd
 }
 
 func newConvertCmd() *cobra.Command {
 	profileFlag := ""
 	profilesFlag := ""
+	fromType := ""
 
 	cmd := &cobra.Command{
 		Use:   "convert",
-		Short: "Convert profile XML to YAML (1:1, no normalization)",
-		Long: `Converts .profile-meta.xml files to YAML preserving the original
-XML structure exactly — no normalization, no schema cross-check, no sorting.
+		Short: "Convert profiles between XML and YAML (1:1, no normalization)",
+		Long: `Converts .profile-meta.xml files to YAML, or .profile-meta.yaml files back
+to XML, preserving element order and structure — no normalization, no schema
+cross-check, no sorting.
 
-Output files are written as siblings to the source with a .profile-meta.yaml
-extension. The source XML files are not modified.`,
+Output files are written as siblings to the source: .profile-meta.yaml when
+reading XML, .profile-meta.xml when reading YAML. The XML declaration, attributes
+and comments are not represented in YAML, so a YAML-to-XML conversion cannot
+restore them.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectPath, _ := cmd.Flags().GetString("path")
 
@@ -245,17 +288,22 @@ extension. The source XML files are not modified.`,
 				return fmt.Errorf("required flag --path / -p is missing")
 			}
 
+			if _, err := converter.ParseFromType(fromType); err != nil {
+				return err
+			}
+
 			// Everything below touches the filesystem. A failure there is
 			// not a usage error, so stop repeating the flag list.
 			cmd.SilenceUsage = true
 
-			return converter.ConvertProfiles(projectPath, profileFlag, profilesFlag)
+			return converter.ConvertProfiles(projectPath, profileFlag, profilesFlag, fromType)
 		},
 	}
 
 	addPathFlag(cmd)
 	cmd.Flags().StringVarP(&profileFlag, "profile", "r", "", "Convert a single profile by name (mutually exclusive with --profiles)")
 	cmd.Flags().StringVarP(&profilesFlag, "profiles", "l", "", "Comma-separated list of profile names to convert (mutually exclusive with --profile)")
+	cmd.Flags().StringVarP(&fromType, "from-type", "f", "xml", "Source format to convert from: xml or yaml")
 	cmd.MarkFlagsMutuallyExclusive("profile", "profiles")
 	return cmd
 }
@@ -274,15 +322,19 @@ func newPermSetCmd() *cobra.Command {
 func newPermSetConvertCmd() *cobra.Command {
 	permsetFlag := ""
 	permsetsFlag := ""
+	fromType := ""
 
 	cmd := &cobra.Command{
 		Use:   "convert",
-		Short: "Convert permission set XML to YAML (1:1, no normalization)",
-		Long: `Converts .permissionset-meta.xml files to YAML preserving the original
-XML structure exactly — no normalization, no schema cross-check, no sorting.
+		Short: "Convert permission sets between XML and YAML (1:1, no normalization)",
+		Long: `Converts .permissionset-meta.xml files to YAML, or .permissionset-meta.yaml
+files back to XML, preserving element order and structure — no normalization, no
+schema cross-check, no sorting.
 
-Output files are written as siblings to the source with a .permissionset-meta.yaml
-extension. The source XML files are not modified.`,
+Output files are written as siblings to the source: .permissionset-meta.yaml when
+reading XML, .permissionset-meta.xml when reading YAML. The XML declaration,
+attributes and comments are not represented in YAML, so a YAML-to-XML conversion
+cannot restore them.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectPath, _ := cmd.Flags().GetString("path")
 
@@ -290,17 +342,22 @@ extension. The source XML files are not modified.`,
 				return fmt.Errorf("required flag --path / -p is missing")
 			}
 
+			if _, err := converter.ParseFromType(fromType); err != nil {
+				return err
+			}
+
 			// Everything below touches the filesystem. A failure there is
 			// not a usage error, so stop repeating the flag list.
 			cmd.SilenceUsage = true
 
-			return converter.ConvertPermSets(projectPath, permsetFlag, permsetsFlag)
+			return converter.ConvertPermSets(projectPath, permsetFlag, permsetsFlag, fromType)
 		},
 	}
 
 	addPathFlag(cmd)
 	cmd.Flags().StringVarP(&permsetFlag, "permset", "r", "", "Convert a single permission set by name (mutually exclusive with --permsets)")
 	cmd.Flags().StringVarP(&permsetsFlag, "permsets", "l", "", "Comma-separated list of permission set names to convert (mutually exclusive with --permset)")
+	cmd.Flags().StringVarP(&fromType, "from-type", "f", "xml", "Source format to convert from: xml or yaml")
 	cmd.MarkFlagsMutuallyExclusive("permset", "permsets")
 	return cmd
 }

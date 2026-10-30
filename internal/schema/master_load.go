@@ -75,13 +75,7 @@ func LoadProfiles(projectPath string) (*graph.SalesforceGraph, error) {
 		p.IsCustom = r.Profile.IsCustom
 		p.HasCustomTag = r.Profile.HasCustomTag
 
-		for tag, names := range r.Profile.Ghosts {
-			metaType := graph.TagToMetaType(tag)
-
-			for _, name := range names {
-				p.Ghosts = append(p.Ghosts, graph.GhostEntry{MetaType: metaType, Name: name})
-			}
-		}
+		p.Ghosts = append(p.Ghosts, r.Profile.Ghosts...)
 
 		// Map section entries to graph edges.
 		for sectionTag, entries := range r.Profile.Sections {

@@ -47,10 +47,17 @@ func CrossReference(g *graph.SalesforceGraph, repoFiles map[string]map[string]bo
 
 	// Ghost references never become nodes, so a profile-only reference to
 	// metadata with no file has to be read from the profiles themselves.
-	reported := make(map[string]bool, len(xr.MissingFiles))
+	// repoKey identifies one metadata target; the two directions dedupe on the
+	// same tuple, and a struct key cannot collide the way "type\x00name" can.
+	type repoKey struct {
+		metaType string
+		name     string
+	}
+
+	reported := make(map[repoKey]bool, len(xr.MissingFiles))
 
 	for _, me := range xr.MissingFiles {
-		reported[me.MetaType+"\x00"+me.Name] = true
+		reported[repoKey{metaType: me.MetaType, name: me.Name}] = true
 	}
 
 	seenGhosts := make(map[GhostRef]bool)
@@ -71,7 +78,7 @@ func CrossReference(g *graph.SalesforceGraph, repoFiles map[string]map[string]bo
 				xr.Ghosts = append(xr.Ghosts, ref)
 			}
 
-			key := metaType + "\x00" + ghost.Name
+			key := repoKey{metaType: metaType, name: ghost.Name}
 			if reported[key] {
 				continue
 			}
