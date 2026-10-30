@@ -37,12 +37,12 @@ const wantPermSetYAML = `PermissionSet:
   label: "Sample Integration User"
   license: "Salesforce"
   objectPermissions:
+    object: "Account"
     allowCreate: "false"
     allowDelete: "false"
     allowEdit: "false"
     allowRead: "true"
     modifyAllRecords: "false"
-    object: "Account"
     viewAllRecords: "true"
 `
 
@@ -84,7 +84,7 @@ func TestConvertProfilesWritesToDisk(t *testing.T) {
 	dir := t.TempDir()
 	copyFixture(t, "Admin.profile-meta.xml", dir)
 
-	if err := ConvertProfiles(dir, "", ""); err != nil {
+	if err := ConvertProfiles(dir, "", "", ""); err != nil {
 		t.Fatalf("ConvertProfiles: %v", err)
 	}
 
@@ -109,7 +109,7 @@ func TestConvertPermSetsWritesToDisk(t *testing.T) {
 	dir := t.TempDir()
 	copyFixture(t, "Sample.permissionset-meta.xml", dir)
 
-	if err := ConvertPermSets(dir, "", ""); err != nil {
+	if err := ConvertPermSets(dir, "", "", ""); err != nil {
 		t.Fatalf("ConvertPermSets: %v", err)
 	}
 
@@ -127,7 +127,7 @@ func TestConvertProfilesFilterMissingName(t *testing.T) {
 	dir := t.TempDir()
 	copyFixture(t, "Admin.profile-meta.xml", dir)
 
-	err := ConvertProfiles(dir, "DoesNotExist", "")
+	err := ConvertProfiles(dir, "DoesNotExist", "", "")
 	if err == nil {
 		t.Fatal("expected an error for an unknown profile name")
 	}

@@ -1447,8 +1447,8 @@ func shapeProfile(t *testing.T, label, doc string) shapedProfile {
 			tag := t2.Name.Local
 			shape.tags = append(shape.tags, tag)
 
-			nameField, ok := sectionNameField[tag]
-			if !ok {
+			nameField := graph.SectionNameField(tag)
+			if nameField == "" {
 				if err := dec.Skip(); err != nil {
 					t.Fatalf("%s/%s: skip: %v", label, tag, err)
 				}

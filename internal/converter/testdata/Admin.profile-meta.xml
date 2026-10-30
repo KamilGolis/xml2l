@@ -16,8 +16,8 @@
         <visible>true</visible>
     </applicationVisibilities>
     <fieldPermissions>
-        <field>Account.Revenue__c</field>
         <editable>true</editable>
+        <field>Account.Revenue__c</field>
         <readable>true</readable>
     </fieldPermissions>
     <tabVisibilities>

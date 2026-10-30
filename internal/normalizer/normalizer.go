@@ -18,30 +18,6 @@ import (
 	"xml2l/internal/graph"
 )
 
-// sectionNameField maps each profile section XML tag to the XML element name
-// used for the entry's identifying name within that section. Used by
-// buildRawEntryIndex to locate specific entries in raw profile XML.
-var sectionNameField = map[string]string{
-	"classAccesses":                 "apexClass",
-	"agentAccesses":                 "agent",
-	"applicationVisibilities":       "application",
-	"categoryGroupVisibilities":     "dataCategoryGroup",
-	"customMetadataTypeAccesses":    "name",
-	"customPermissions":             "name",
-	"customSettingAccesses":         "name",
-	"fieldPermissions":              "field",
-	"layoutAssignments":             "layout",
-	"objectPermissions":             "object",
-	"pageAccesses":                  "apexPage",
-	"recordTypeVisibilities":        "recordType",
-	"servicePresenceStatusAccesses": "servicePresenceStatus",
-	"tabVisibilities":               "tab",
-	"userPermissions":               "name",
-	"flowAccesses":                  "flow",
-	"externalDataSourceAccesses":    "externalDataSource",
-	"genComputingSummaryDefAccess":  "enhancedSummaryDef",
-}
-
 // NormalizeGraph is the interface the normalizer requires to access profile
 // data from the graph without depending on the concrete SalesforceGraph type.
 type NormalizeGraph interface {
@@ -371,7 +347,7 @@ func sectionBlocks(p *graph.ProfileNode, g NormalizeGraph, rawEntries rawEntryIn
 
 		// Marshal entries in sorted order; excluded entries preserve original XML.
 		patterns := g.ExcludePatterns()
-		_, hasNameField := sectionNameField[sectionTag]
+		hasNameField := graph.SectionNameField(sectionTag) != ""
 
 		for _, e := range entries {
 			if len(patterns) > 0 && matchesExclude(e.name, patterns) {
@@ -736,8 +712,8 @@ func buildRawEntryIndex(rawXML string) (rawEntryIndex, error) {
 	}
 
 	for _, el := range elems {
-		nameField, ok := sectionNameField[el.tag]
-		if !ok {
+		nameField := graph.SectionNameField(el.tag)
+		if nameField == "" {
 			continue
 		}
 

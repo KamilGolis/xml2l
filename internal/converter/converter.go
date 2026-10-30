@@ -11,6 +11,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"gopkg.in/yaml.v3"
+
+	"xml2l/internal/graph"
 )
 
 // bufNode represents a parsed XML element with its children buffered.
@@ -30,18 +34,25 @@ type nameGroup struct {
 // by profileName (single) or profilesCSV (comma-separated) if provided, converts
 // each to YAML, writes the output to disk, and prints progress to stderr.
 // profileName and profilesCSV must not both be set — the caller enforces this.
-func ConvertProfiles(projectPath, profileName, profilesCSV string) error {
-	profiles, err := findAndFilter(projectPath, profileName, profilesCSV)
+func ConvertProfiles(projectPath, profileName, profilesCSV, fromType string) error {
+	direction, err := ParseFromType(fromType)
+	if err != nil {
+		return err
+	}
+
+	inSuffix, outSuffix := profileSuffixes(direction)
+
+	profiles, err := findAndFilter(projectPath, profileName, profilesCSV, inSuffix)
 	if err != nil {
 		return err
 	}
 
 	for _, profilePath := range profiles {
-		outPath, yamlBytes, err := ConvertProfileFile(profilePath)
+		outPath, content, err := convertFile(profilePath, direction, inSuffix, outSuffix, "Profile")
 		if err != nil {
 			return fmt.Errorf("convert %s: %w", profilePath, err)
 		}
-		if err := os.WriteFile(outPath, yamlBytes, 0o644); err != nil {
+		if err := os.WriteFile(outPath, content, 0o644); err != nil {
 			return fmt.Errorf("write %s: %w", outPath, err)
 		}
 
@@ -50,6 +61,44 @@ func ConvertProfiles(projectPath, profileName, profilesCSV string) error {
 	fmt.Fprintf(os.Stderr, "Done. %d profile(s) converted.\n", len(profiles))
 
 	return nil
+}
+
+// profileSuffixes returns the input and output suffixes for a direction.
+func profileSuffixes(direction string) (inSuffix, outSuffix string) {
+	if direction == FromTypeYAML {
+		return ".profile-meta.yaml", ".profile-meta.xml"
+	}
+
+	return ".profile-meta.xml", ".profile-meta.yaml"
+}
+
+// permSetSuffixes returns the input and output suffixes for a direction.
+func permSetSuffixes(direction string) (inSuffix, outSuffix string) {
+	if direction == FromTypeYAML {
+		return ".permissionset-meta.yaml", ".permissionset-meta.xml"
+	}
+
+	return ".permissionset-meta.xml", ".permissionset-meta.yaml"
+}
+
+// convertFile converts one file in the given direction and returns the output
+// path and content.
+func convertFile(inputPath, direction, inSuffix, outSuffix, rootName string) (string, []byte, error) {
+	if direction == FromTypeYAML {
+		data, err := os.ReadFile(inputPath)
+		if err != nil {
+			return "", nil, fmt.Errorf("read %s: %w", inputPath, err)
+		}
+
+		content, err := YAMLToXML(data, rootName)
+		if err != nil {
+			return "", nil, err
+		}
+
+		return strings.TrimSuffix(inputPath, inSuffix) + outSuffix, content, nil
+	}
+
+	return convertXmlToYaml(inputPath, inSuffix, outSuffix)
 }
 
 // convertXmlToYaml reads XML from inputPath and returns the derived output path
@@ -67,11 +116,13 @@ func convertXmlToYaml(inputPath, inSuffix, outSuffix string) (outputPath string,
 		return "", nil, fmt.Errorf("parse %s: %w", inputPath, err)
 	}
 
-	var buf bytes.Buffer
-	root.emit(&buf, 0)
+	yamlBytes, err = encodeYAML(root)
+	if err != nil {
+		return "", nil, fmt.Errorf("encode %s: %w", inputPath, err)
+	}
 
 	outputPath = strings.TrimSuffix(inputPath, inSuffix) + outSuffix
-	return outputPath, buf.Bytes(), nil
+	return outputPath, yamlBytes, nil
 }
 
 // ConvertProfileFile reads XML from inputPath and returns the derived output path
@@ -93,14 +144,14 @@ func ConvertPermSetFile(inputPath string) (outputPath string, yamlBytes []byte, 
 // list). If both are empty, all discovered profiles are returned.
 // profileName and profilesCSV must not both be set — the caller (CLI) enforces
 // this via MarkFlagsMutuallyExclusive.
-func findAndFilter(projectPath, profileName, profilesCSV string) ([]string, error) {
-	all, err := findProfiles(projectPath)
+func findAndFilter(projectPath, profileName, profilesCSV, suffix string) ([]string, error) {
+	all, err := findProfiles(projectPath, suffix)
 	if err != nil {
 		return nil, err
 	}
 
 	if profileName != "" {
-		matched, _, err := filterByNames(all, []string{profileName})
+		matched, _, err := filterByNames(all, []string{profileName}, suffix)
 		if err != nil {
 			return nil, err
 		}
@@ -115,7 +166,7 @@ func findAndFilter(projectPath, profileName, profilesCSV string) ([]string, erro
 			names[i] = strings.TrimSpace(names[i])
 		}
 
-		matched, _, err := filterByNames(all, names)
+		matched, _, err := filterByNames(all, names, suffix)
 		if err != nil {
 			return nil, err
 		}
@@ -126,8 +177,8 @@ func findAndFilter(projectPath, profileName, profilesCSV string) ([]string, erro
 	return all, nil
 }
 
-// findProfiles walks dir searching for *.profile-meta.xml files.
-func findProfiles(dir string) ([]string, error) {
+// findProfiles walks dir searching for files with the given suffix.
+func findProfiles(dir, suffix string) ([]string, error) {
 	var files []string
 
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
@@ -139,7 +190,7 @@ func findProfiles(dir string) ([]string, error) {
 			return nil
 		}
 
-		if strings.HasSuffix(d.Name(), ".profile-meta.xml") {
+		if strings.HasSuffix(d.Name(), suffix) {
 			files = append(files, path)
 		}
 
@@ -152,16 +203,39 @@ func findProfiles(dir string) ([]string, error) {
 	return files, nil
 }
 
+// metadataSuffixes are stripped from user-supplied names, so "Admin.xml" and
+// "Admin.profile-meta.yaml" both select the profile "Admin". Longest first.
+var metadataSuffixes = []string{
+	".profile-meta.xml",
+	".profile-meta.yaml",
+	".permissionset-meta.xml",
+	".permissionset-meta.yaml",
+	".xml",
+	".yaml",
+	".yml",
+}
+
+// normalizeMetadataName removes a known file suffix from a user-supplied name.
+func normalizeMetadataName(name string) string {
+	for _, suffix := range metadataSuffixes {
+		if strings.HasSuffix(name, suffix) {
+			return strings.TrimSuffix(name, suffix)
+		}
+	}
+
+	return name
+}
+
 // filterByNames returns only the profile paths whose base name (without
 // .profile-meta.xml) matches one of the given names. The available names are
 // returned alongside for error reporting.
-func filterByNames(profiles []string, names []string) (matched []string, available []string, err error) {
+func filterByNames(profiles []string, names []string, suffix string) (matched []string, available []string, err error) {
 	available = make([]string, 0, len(profiles))
 	byName := make(map[string]string, len(profiles))
 
 	for _, p := range profiles {
 		base := filepath.Base(p)
-		name := strings.TrimSuffix(base, ".profile-meta.xml")
+		name := strings.TrimSuffix(base, suffix)
 		available = append(available, name)
 		byName[name] = p
 	}
@@ -169,6 +243,8 @@ func filterByNames(profiles []string, names []string) (matched []string, availab
 	missing := make([]string, 0, len(names))
 
 	for _, n := range names {
+		n = normalizeMetadataName(strings.TrimSpace(n))
+
 		if p, ok := byName[n]; ok {
 			matched = append(matched, p)
 		} else {
@@ -243,52 +319,93 @@ func readElement(decoder *xml.Decoder, se xml.StartElement) (bufNode, error) {
 	}
 }
 
-// emit writes a single node (no grouping) at the given indent.
-func (n bufNode) emit(buf *bytes.Buffer, indent int) {
-	pfx := strings.Repeat(" ", indent)
-
-	if len(n.Children) == 0 {
-		fmt.Fprintf(buf, "%s%s: %s\n", pfx, n.Name, yq(n.Text))
-	} else {
-		fmt.Fprintf(buf, "%s%s:\n", pfx, n.Name)
-		emitGrouped(buf, n.Children, indent+2)
+// encodeYAML renders the element tree as YAML. Keys stay plain element names
+// and every value is double-quoted, so a value that looks like a boolean or a
+// number cannot be reinterpreted when the YAML is read back.
+func encodeYAML(root bufNode) ([]byte, error) {
+	node := &yaml.Node{
+		Kind: yaml.MappingNode,
+		Content: []*yaml.Node{
+			{Kind: yaml.ScalarNode, Value: root.Name},
+			mappingNode(root.Children, ""),
+		},
 	}
+
+	var buf bytes.Buffer
+
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+
+	if err := enc.Encode(node); err != nil {
+		return nil, err
+	}
+
+	if err := enc.Close(); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
 }
 
-// emitGrouped writes the grouped children to buf at the given indent level.
-func emitGrouped(buf *bytes.Buffer, nodes []bufNode, indent int) {
-	groups := groupByName(nodes)
+// mappingNode renders sibling elements: each distinct name once, in
+// first-appearance order. When anchor is one of the names, that child is moved
+// first so a human sees the entry's identifier at the top of its item.
+func mappingNode(nodes []bufNode, anchor string) *yaml.Node {
+	node := &yaml.Node{Kind: yaml.MappingNode}
 
-	for _, g := range groups {
-		pfx := strings.Repeat(" ", indent)
-
-		if len(g.Elements) == 1 {
-			// Singleton — plain key-value or nested map.
-			g.Elements[0].emit(buf, indent)
-		} else {
-			// Repeated — YAML sequence.
-			fmt.Fprintf(buf, "%s%s:\n", pfx, g.Name)
-
-			for _, el := range g.Elements {
-				if len(el.Children) == 0 {
-					// Leaf repeated items become scalar list items.
-					fmt.Fprintf(buf, "%s  - %s\n", pfx, yq(el.Text))
-				} else {
-					// Complex repeated — first child inline with "- ".
-					emitSeqItem(buf, el.Children, indent+2)
-				}
-			}
-		}
+	for _, group := range moveGroupFirst(groupByName(nodes), anchor) {
+		key := &yaml.Node{Kind: yaml.ScalarNode, Value: group.Name}
+		node.Content = append(node.Content, key, groupNode(group))
 	}
+
+	return node
+}
+
+// groupNode renders one element name: a single element as a value, repeated
+// elements as a sequence in document order.
+func groupNode(group nameGroup) *yaml.Node {
+	if len(group.Elements) == 1 {
+		return elementNode(group.Name, group.Elements[0])
+	}
+
+	seq := &yaml.Node{Kind: yaml.SequenceNode}
+
+	for _, element := range group.Elements {
+		seq.Content = append(seq.Content, elementNode(group.Name, element))
+	}
+
+	return seq
+}
+
+// moveGroupFirst moves the group named anchor to the front, leaving the rest in
+// their original order.
+func moveGroupFirst(groups []nameGroup, anchor string) []nameGroup {
+	if anchor == "" {
+		return groups
+	}
+
+	for i, group := range groups {
+		if group.Name != anchor || i == 0 {
+			continue
+		}
+
+		moved := make([]nameGroup, 0, len(groups))
+		moved = append(moved, group)
+		moved = append(moved, groups[:i]...)
+		moved = append(moved, groups[i+1:]...)
+
+		return moved
+	}
+
+	return groups
 }
 
 // groupByName groups nodes by their Name, preserving the original first-appearance
 // order of distinct names.
 func groupByName(nodes []bufNode) []nameGroup {
 	order := make([]string, 0, len(nodes))
-
-	// name → index in order
 	seen := make(map[string]int)
+
 	for _, n := range nodes {
 		if _, ok := seen[n.Name]; !ok {
 			seen[n.Name] = len(order)
@@ -296,13 +413,15 @@ func groupByName(nodes []bufNode) []nameGroup {
 		}
 	}
 
-	groups := make([]nameGroup, len(order))
 	lists := make([][]bufNode, len(order))
 
 	for _, n := range nodes {
 		idx := seen[n.Name]
 		lists[idx] = append(lists[idx], n)
 	}
+
+	groups := make([]nameGroup, len(order))
+
 	for i, name := range order {
 		groups[i] = nameGroup{Name: name, Elements: lists[i]}
 	}
@@ -310,69 +429,23 @@ func groupByName(nodes []bufNode) []nameGroup {
 	return groups
 }
 
-// emitSeqItem writes one YAML sequence item for a complex element.
-// The "name" child (first non-boolean text child, i.e. the identifying key
-// like <object>, <field>, <apexClass>) gets the "- " prefix; remaining children
-// are indented. Falls back to the first child if all children have boolean values.
-func emitSeqItem(buf *bytes.Buffer, children []bufNode, itemIndent int) {
-	if len(children) == 0 {
-		return
-	}
-
-	// Find the identifying element — first child whose text is not "true"/"false".
-	// In Salesforce metadata sections, this is the name/identifier (e.g. <object>, <field>).
-	nameIdx := -1
-	for i, child := range children {
-		if !isBooleanText(child.Text) {
-			nameIdx = i
-			break
+// elementNode renders one element: its children as a mapping, or its text as a
+// quoted scalar. tag is the element's section name, used to hoist its
+// identifying child.
+func elementNode(tag string, element bufNode) *yaml.Node {
+	if len(element.Children) == 0 {
+		return &yaml.Node{
+			Kind:  yaml.ScalarNode,
+			Style: yaml.DoubleQuotedStyle,
+			Value: element.Text,
 		}
 	}
-	if nameIdx < 0 {
-		nameIdx = 0 // fallback: first child
-	}
 
-	itemPfx := strings.Repeat(" ", itemIndent)
-
-	// Emit the name child with "- " prefix
-	child := children[nameIdx]
-	if len(child.Children) == 0 {
-		fmt.Fprintf(buf, "%s- %s: %s\n", itemPfx, child.Name, yq(child.Text))
-	} else {
-		fmt.Fprintf(buf, "%s- %s:\n", itemPfx, child.Name)
-		emitGrouped(buf, child.Children, itemIndent+2)
-	}
-
-	// Emit remaining children indented
-	childPfx := strings.Repeat(" ", itemIndent+2)
-	for i, child := range children {
-		if i == nameIdx {
-			continue
-		}
-		if len(child.Children) == 0 {
-			fmt.Fprintf(buf, "%s%s: %s\n", childPfx, child.Name, yq(child.Text))
-		} else {
-			fmt.Fprintf(buf, "%s%s:\n", childPfx, child.Name)
-			emitGrouped(buf, child.Children, itemIndent+4)
-		}
-	}
+	return mappingNode(element.Children, graph.SectionNameField(tag))
 }
 
-// isBooleanText returns true if t is a boolean-valued string.
-// Used by emitSeqItem to identify the "name" child in repeated sections.
-func isBooleanText(t string) bool {
-	return t == "true" || t == "false"
-}
-
-// yq wraps a string in YAML-safe double quotes.
-func yq(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "\"", "\\\"")
-	return `"` + s + `"`
-}
-
-// findPermSets walks dir searching for *.permissionset-meta.xml files.
-func findPermSets(dir string) ([]string, error) {
+// findPermSets walks dir searching for files with the given suffix.
+func findPermSets(dir, suffix string) ([]string, error) {
 	var files []string
 
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
@@ -384,7 +457,7 @@ func findPermSets(dir string) ([]string, error) {
 			return nil
 		}
 
-		if strings.HasSuffix(d.Name(), ".permissionset-meta.xml") {
+		if strings.HasSuffix(d.Name(), suffix) {
 			files = append(files, path)
 		}
 
@@ -400,13 +473,13 @@ func findPermSets(dir string) ([]string, error) {
 // filterByPermSetNames returns only the perm set paths whose base name (without
 // .permissionset-meta.xml) matches one of the given names. The available names are
 // returned alongside for error reporting.
-func filterByPermSetNames(permsets []string, names []string) (matched []string, available []string, err error) {
+func filterByPermSetNames(permsets []string, names []string, suffix string) (matched []string, available []string, err error) {
 	available = make([]string, 0, len(permsets))
 	byName := make(map[string]string, len(permsets))
 
 	for _, p := range permsets {
 		base := filepath.Base(p)
-		name := strings.TrimSuffix(base, ".permissionset-meta.xml")
+		name := strings.TrimSuffix(base, suffix)
 		available = append(available, name)
 		byName[name] = p
 	}
@@ -414,6 +487,8 @@ func filterByPermSetNames(permsets []string, names []string) (matched []string, 
 	missing := make([]string, 0, len(names))
 
 	for _, n := range names {
+		n = normalizeMetadataName(strings.TrimSpace(n))
+
 		if p, ok := byName[n]; ok {
 			matched = append(matched, p)
 		} else {
@@ -437,14 +512,14 @@ func filterByPermSetNames(permsets []string, names []string) (matched []string, 
 // permsetsCSV (comma-separated list). If both are empty, all discovered perm
 // sets are returned. permsetName and permsetsCSV must not both be set — the
 // caller (CLI) enforces this via MarkFlagsMutuallyExclusive.
-func findAndFilterPermSets(projectPath, permsetName, permsetsCSV string) ([]string, error) {
-	all, err := findPermSets(projectPath)
+func findAndFilterPermSets(projectPath, permsetName, permsetsCSV, suffix string) ([]string, error) {
+	all, err := findPermSets(projectPath, suffix)
 	if err != nil {
 		return nil, err
 	}
 
 	if permsetName != "" {
-		matched, _, err := filterByPermSetNames(all, []string{permsetName})
+		matched, _, err := filterByPermSetNames(all, []string{permsetName}, suffix)
 		if err != nil {
 			return nil, err
 		}
@@ -459,7 +534,7 @@ func findAndFilterPermSets(projectPath, permsetName, permsetsCSV string) ([]stri
 			names[i] = strings.TrimSpace(names[i])
 		}
 
-		matched, _, err := filterByPermSetNames(all, names)
+		matched, _, err := filterByPermSetNames(all, names, suffix)
 		if err != nil {
 			return nil, err
 		}
@@ -474,18 +549,25 @@ func findAndFilterPermSets(projectPath, permsetName, permsetsCSV string) ([]stri
 // filters by permsetName (single) or permsetsCSV (comma-separated) if provided,
 // converts each to YAML, writes the output to disk, and prints progress to stderr.
 // permsetName and permsetsCSV must not both be set — the caller enforces this.
-func ConvertPermSets(projectPath, permsetName, permsetsCSV string) error {
-	permsets, err := findAndFilterPermSets(projectPath, permsetName, permsetsCSV)
+func ConvertPermSets(projectPath, permsetName, permsetsCSV, fromType string) error {
+	direction, err := ParseFromType(fromType)
+	if err != nil {
+		return err
+	}
+
+	inSuffix, outSuffix := permSetSuffixes(direction)
+
+	permsets, err := findAndFilterPermSets(projectPath, permsetName, permsetsCSV, inSuffix)
 	if err != nil {
 		return err
 	}
 
 	for _, permsetPath := range permsets {
-		outPath, yamlBytes, err := ConvertPermSetFile(permsetPath)
+		outPath, content, err := convertFile(permsetPath, direction, inSuffix, outSuffix, "PermissionSet")
 		if err != nil {
 			return fmt.Errorf("convert %s: %w", permsetPath, err)
 		}
-		if err := os.WriteFile(outPath, yamlBytes, 0o644); err != nil {
+		if err := os.WriteFile(outPath, content, 0o644); err != nil {
 			return fmt.Errorf("write %s: %w", outPath, err)
 		}
 
