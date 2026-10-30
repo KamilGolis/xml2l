@@ -1,0 +1,9 @@
+# YAML is the round-trip format for profiles and permission sets
+
+`profile convert` and `permset convert` write a YAML representation that mirrors the XML element tree: a mapping key is an element, a sequence under a key is repeated elements, and a scalar is an element's text. `--from-type yaml` reads the same shape back, so an XML → YAML → XML round trip preserves the element tree and changes only formatting.
+
+Every scalar is written double-quoted, so a value such as `false` or `1` stays a string when the YAML is read back, and a text value that contains a line break is escaped rather than folded.
+
+The YAML does not carry XML attributes, comments, the XML declaration or indentation, so they cannot come back. That is the trade-off that makes the format readable and diffable; keeping them would need attribute markers in the YAML, which is neither human-editable nor worth it for Salesforce metadata, where profiles and permission sets use attributes only for the namespace.
+
+Conversion stays separate from `save`: no backfill, no schema cross-check. The YAML puts an entry's identifying child first (`field`, `name`, `object`, …) so a person can see what an item is; the XML writer puts an entry's children back in Salesforce's order — alphabetical — so a profile written by `save` or `sf project retrieve` converts back byte for byte. A hand-written entry whose children are in another order comes back sorted. Repeated elements are grouped under their name, so a file that interleaves two sections of the same name is regrouped on the way through. The registry that maps a section tag to its identifying child is shared with the normalizer, so both agree on which element names an entry. The generator and the parser live in the same package and share the element model, and round-trip tests guard both.

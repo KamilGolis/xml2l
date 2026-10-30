@@ -162,6 +162,51 @@ func TestSaveDryRunRequiresEntryPointClasses(t *testing.T) {
 	}
 }
 
+func TestConvertYAMLToXML(t *testing.T) {
+	dir := t.TempDir()
+
+	writeMetaFile(t, dir, "profiles/Admin.profile-meta.yaml", `Profile:
+  userLicense: "Salesforce"
+  custom: "false"
+`)
+
+	out, err := execute(t, "profile", "convert", "-p", dir, "-f", "yaml")
+	if err != nil {
+		t.Fatalf("convert: %v\n%s", err, out)
+	}
+
+	xmlBytes, readErr := os.ReadFile(filepath.Join(dir, "profiles", "Admin.profile-meta.xml"))
+	if readErr != nil {
+		t.Fatalf("read converted XML: %v", readErr)
+	}
+
+	for _, want := range []string{
+		`<Profile xmlns="http://soap.sforce.com/2006/04/metadata">`,
+		"<userLicense>Salesforce</userLicense>",
+		"<custom>false</custom>",
+	} {
+		if !strings.Contains(string(xmlBytes), want) {
+			t.Errorf("converted XML missing %s:\n%s", want, xmlBytes)
+		}
+	}
+}
+
+func TestConvertRejectsUnknownFromType(t *testing.T) {
+	out, err := execute(t, "profile", "convert", "-p", t.TempDir(), "-f", "json")
+
+	if err == nil {
+		t.Fatal("expected an error for --from-type json")
+	}
+
+	if !strings.Contains(out, "supported: xml, yaml") {
+		t.Errorf("unexpected output:\n%s", out)
+	}
+
+	if !strings.Contains(out, "Usage:") {
+		t.Errorf("an invalid flag value should print usage, got:\n%s", out)
+	}
+}
+
 func TestSaveFailsOnUndecodableProfile(t *testing.T) {
 	dir := writeProject(t)
 	truncatedPath := filepath.Join(dir, "profiles", "Trunc.profile-meta.xml")

@@ -117,6 +117,35 @@ Pruning is intentionally not retrieve-faithful for class access: the next
 ./xml2l profile save --path ./my-sfdx-project/main/default --entry-point-classes --dry-run
 ```
 
+## Converting to and from YAML
+
+`profile convert` and `permset convert` rewrite metadata 1:1 — no normalization,
+no schema cross-check, no sorting.
+
+```bash
+# XML → YAML (default)
+./xml2l profile convert --path ./my-sfdx-project/main/default
+
+# YAML → XML
+./xml2l profile convert --path ./my-sfdx-project/main/default --from-type yaml
+
+# One profile only; the file suffix is optional
+./xml2l profile convert --path ./my-sfdx-project/main/default --profile "Admin.xml" --from-type yaml
+```
+
+`-f/--from-type` selects `xml` (default) or `yaml`; the result is written as a
+sibling with the other extension. `-r/--profile` and `-l/--profiles` take bare
+names — `.xml`, `.yaml`, `.profile-meta.xml` and `.profile-meta.yaml` are stripped
+if present.
+
+YAML carries elements and text only: XML attributes, comments and the original
+indentation are not represented, so a YAML → XML conversion cannot restore them.
+The YAML puts an entry's identifying child first (`field`, `name`, `object`, …)
+for readability; converting back writes an entry's children in Salesforce order
+(alphabetical), so a profile written by `save` or `sf project retrieve` converts
+back byte for byte.
+See [ADR-0005](docs/adr/0005-yaml-round-trip-format.md).
+
 ### Example output
 
 ```
