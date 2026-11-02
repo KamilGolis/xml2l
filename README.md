@@ -9,7 +9,6 @@ Spot differences between Salesforce profiles. Backfill missing entries. Understa
 - **Diff** profiles against each other — find out which Apex classes, objects, fields, tabs, or flows one profile has and another doesn't
 - **Normalize** profiles — backfill every permission entry the Master Schema knows about, sorted and consistent, so a save diffs cleanly against a fresh retrieve
 - **Cross-reference** profile permissions against the filesystem — flag metadata referenced in profiles but missing from disk, and vice versa
-- **Export** the permission graph as JSON, Graphviz DOT, or Cytoscape.js — for visualization or pipeline consumption
 
 ## Installation
 
@@ -174,22 +173,12 @@ When you run `profile save`, every profile gets:
 
 The goal is deterministic output: run it twice, get identical files.
 
-## Graph exports - (in progress)
-
-Diff reports can include a filesystem cross-reference (`--repo`), and the internal graph can be serialized to:
-
-- **JSON** — Cytoscape.js-compatible format for web visualization
-- **DOT** — Graphviz format for rendering with `dot` or `neato`
-- **Cytoscape.js** — capped per-type summaries for large graphs
-
-> **Note:** Graph export to JSON, DOT, and Cytoscape.js is currently in implementation and not available yet. The internal graph structures and export types are laid out, but the CLI flags and output plumbing are unfinished.
-
 ## Project structure
 
 ```
 ├── cmd/engine/main.go           CLI entry point (cobra commands)
 ├── internal/
-│   ├── graph/                   Bipartite graph model + DOT/JSON/Cytoscape export
+│   ├── graph/                   Bipartite graph model
 │   ├── normalizer/              Phase 3: backfill + sort + serialize to XML
 │   ├── profile/                 Phase 1: decode a single .profile-meta.xml
 │   ├── report/                  Diff computation + filesystem cross-reference
