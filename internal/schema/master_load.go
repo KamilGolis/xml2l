@@ -2,6 +2,7 @@ package schema
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -12,9 +13,9 @@ import (
 // LoadProfiles walks projectPath for *.profile-meta.xml files, runs the
 // concurrent Phase 2 pipeline (scan → concurrent decode → Master Schema),
 // and builds a SalesforceGraph from the results.
-func LoadProfiles(projectPath string) (*graph.SalesforceGraph, error) {
+func LoadProfiles(projectPath string, warn io.Writer) (*graph.SalesforceGraph, error) {
 	// Phase 1: Scan for ground-truth metadata.
-	gt, err := scanner.Scan(projectPath)
+	gt, err := scanner.Scan(projectPath, warn)
 	if err != nil {
 		return nil, fmt.Errorf("scan repo: %w", err)
 	}

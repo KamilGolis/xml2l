@@ -594,8 +594,13 @@ func TestWriteProfiles(t *testing.T) {
 	// WriteProfiles will skip profiles with empty SourcePath.
 	emptyGraph := graph.NewGraph()
 
-	if err := WriteProfiles(emptyGraph); err != nil {
+	written, err := WriteProfiles(emptyGraph, io.Discard, io.Discard)
+	if err != nil {
 		t.Errorf("WriteProfiles empty: %v", err)
+	}
+
+	if written != 0 {
+		t.Errorf("WriteProfiles empty wrote %d profiles, want 0", written)
 	}
 }
 
@@ -1293,7 +1298,7 @@ func TestNormalizeProfileRetrieveFidelity(t *testing.T) {
 		}
 	}
 
-	g, err := schema.LoadProfiles(dir)
+	g, err := schema.LoadProfiles(dir, io.Discard)
 	if err != nil {
 		t.Fatalf("load fixture project: %v", err)
 	}
@@ -1989,7 +1994,7 @@ func TestNormalizeProfilePreservesEmptyDescription(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	g, err := schema.LoadProfiles(dir)
+	g, err := schema.LoadProfiles(dir, io.Discard)
 	if err != nil {
 		t.Fatalf("load project: %v", err)
 	}

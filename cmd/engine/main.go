@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	reportpkg "xml2l/internal/report"
 	"xml2l/internal/scanner"
 	"xml2l/internal/schema"
+	"xml2l/internal/warnings"
 )
 
 func main() {
@@ -29,9 +31,26 @@ func main() {
 	)
 
 	if err := rootCmd.Execute(); err != nil {
+		var exit *exitError
+		if errors.As(err, &exit) {
+			os.Exit(exit.code)
+		}
+
 		os.Exit(1)
 	}
 }
+
+// exitError carries the process exit code a command wants. Commands return a
+// plain error for the ordinary failure case, and this type when a script must
+// see a specific code — 68 means "partial": some work was written, some was not.
+type exitError struct {
+	code int
+	err  error
+}
+
+func (e *exitError) Error() string { return e.err.Error() }
+
+func (e *exitError) Unwrap() error { return e.err }
 
 func addPathFlag(cmd *cobra.Command) {
 	cmd.Flags().StringP("path", "p", "", "Path to the Salesforce metadata directory, e.g. force-app/main/default (required)")
@@ -85,13 +104,15 @@ to a file.`,
 			// not a usage error, so stop repeating the flag list.
 			cmd.SilenceUsage = true
 
-			g, err := schema.LoadProfiles(projectPath)
+			warn := warnings.New(cmd.ErrOrStderr())
+
+			g, err := schema.LoadProfiles(projectPath, warn)
 			if err != nil {
 				return err
 			}
 
 			for _, decodeErr := range g.DecodeErrors() {
-				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %v\n", decodeErr)
+				warn.Warnf("%v", decodeErr)
 			}
 
 			if len(g.ProfileNodes) < 2 {
@@ -175,7 +196,9 @@ func newSaveCmd() *cobra.Command {
 				return fmt.Errorf("--dry-run requires --entry-point-classes")
 			}
 
-			g, err := schema.LoadProfiles(projectPath)
+			warn := warnings.New(cmd.ErrOrStderr())
+
+			g, err := schema.LoadProfiles(projectPath, warn)
 			if err != nil {
 				return err
 			}
@@ -220,7 +243,7 @@ func newSaveCmd() *cobra.Command {
 				}
 
 				for _, warning := range usage.Warnings {
-					fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning)
+					warn.Warnf("%s", warning)
 				}
 
 				g.SetEntryPointClasses(usage.Required)
@@ -236,7 +259,14 @@ func newSaveCmd() *cobra.Command {
 				return nil
 			}
 
-			if err := normalizer.WriteProfiles(g); err != nil {
+			written, err := normalizer.WriteProfiles(g, cmd.ErrOrStderr(), warn)
+			if err != nil {
+				// A write failure after some profiles landed is still a partial
+				// run, not a complete one.
+				if written > 0 {
+					return &exitError{code: 68, err: err}
+				}
+
 				return err
 			}
 
@@ -249,7 +279,19 @@ func newSaveCmd() *cobra.Command {
 			// left untouched. Saving the rest is still useful, but the run must
 			// not report success.
 			if decodeErrs := g.DecodeErrors(); len(decodeErrs) > 0 {
-				return fmt.Errorf("%d profile(s) could not be decoded and were left untouched: %w", len(decodeErrs), decodeErrs[0])
+				decodeErr := fmt.Errorf("%d profile(s) could not be decoded and were left untouched: %w", len(decodeErrs), decodeErrs[0])
+
+				// Some profiles were written and some were not: a script must be
+				// able to tell that apart from a run that failed entirely.
+				if written > 0 {
+					return &exitError{code: 68, err: decodeErr}
+				}
+
+				return decodeErr
+			}
+
+			if written == 0 {
+				return fmt.Errorf("no profiles found under %s", projectPath)
 			}
 
 			fmt.Fprintf(os.Stderr, "Done. Profiles saved.\n")

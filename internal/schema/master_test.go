@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -253,7 +254,7 @@ func TestLoadProfilesRejectsDuplicateProfileNames(t *testing.T) {
 		writeProfile(t, pkgDir, "Admin.profile-meta.xml", content)
 	}
 
-	_, err := LoadProfiles(dir)
+	_, err := LoadProfiles(dir, io.Discard)
 	if err == nil {
 		t.Fatal("expected an error for duplicate profile names")
 	}
@@ -279,7 +280,7 @@ func TestLoadProfilesAcceptsUniqueNames(t *testing.T) {
 	writeProfile(t, profDir, "Admin.profile-meta.xml", content)
 	writeProfile(t, profDir, "User.profile-meta.xml", content)
 
-	g, err := LoadProfiles(dir)
+	g, err := LoadProfiles(dir, io.Discard)
 	if err != nil {
 		t.Fatalf("LoadProfiles: %v", err)
 	}
