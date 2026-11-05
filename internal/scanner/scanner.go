@@ -5,11 +5,14 @@ package scanner
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"xml2l/internal/warnings"
 )
 
 // GroundTruth is a lookup set of metadata identifiers that exist on disk.
@@ -22,12 +25,16 @@ type GroundTruth map[string]bool
 // (e.g. MyClass.cls + MyClass.cls-meta.xml) collapse to a single key.
 //
 // root is typically the force-app/main/default/ directory of an SFDX project.
-func Scan(root string) (GroundTruth, error) {
+func Scan(root string, warn io.Writer) (GroundTruth, error) {
+	if warn == nil {
+		warn = io.Discard
+	}
+
 	gt := make(GroundTruth)
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: skip %s: %v\n", path, err)
+			fmt.Fprintf(warn, warnings.Prefix+"skip %s: %v\n", path, err)
 			return nil
 		}
 

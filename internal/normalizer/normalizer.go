@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"xml2l/internal/graph"
+	"xml2l/internal/warnings"
 )
 
 // NormalizeGraph is the interface the normalizer requires to access profile
@@ -363,7 +364,7 @@ func sectionBlocks(p *graph.ProfileNode, g NormalizeGraph, rawEntries rawEntryIn
 
 			xmlBytes, err := renderEntry(sectionTag, e.name, e.props, rawEntries[sectionTag][e.name], unknown)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "warning: marshal %s/%s: %v\n", sectionTag, e.name, err)
+				unknown.warnf("marshal %s/%s: %v", sectionTag, e.name, err)
 				continue
 			}
 
@@ -380,6 +381,7 @@ func sectionBlocks(p *graph.ProfileNode, g NormalizeGraph, rawEntries rawEntryIn
 type unknownReport struct {
 	mu     sync.Mutex
 	counts map[unknownKey]int
+	w      io.Writer // destination for warnings raised outside print
 }
 
 type unknownKey struct {
@@ -388,7 +390,26 @@ type unknownKey struct {
 }
 
 func newUnknownReport() *unknownReport {
-	return &unknownReport{counts: make(map[unknownKey]int)}
+	return newUnknownReportTo(os.Stderr)
+}
+
+// newUnknownReportTo sends warnings raised outside print to w.
+func newUnknownReportTo(w io.Writer) *unknownReport {
+	return &unknownReport{counts: make(map[unknownKey]int), w: w}
+}
+
+// warnf writes one warning to the report's destination. A nil report, or one
+// built without a destination, falls back to stderr.
+func (r *unknownReport) warnf(format string, args ...any) {
+	line := warnings.Prefix + fmt.Sprintf(format, args...) + "\n"
+
+	if r == nil || r.w == nil {
+		fmt.Fprint(os.Stderr, line)
+
+		return
+	}
+
+	fmt.Fprint(r.w, line)
 }
 
 // add records one preserved property. It is a no-op on a nil report, so callers
@@ -438,7 +459,7 @@ func (r *unknownReport) print(w io.Writer) {
 			unit = "entry"
 		}
 
-		fmt.Fprintf(w, "warning: %s: preserving unknown element <%s> in %d %s\n", key.section, key.tag, counts[key], unit)
+		fmt.Fprintf(w, warnings.Prefix+"%s: preserving unknown element <%s> in %d %s\n", key.section, key.tag, counts[key], unit)
 	}
 }
 

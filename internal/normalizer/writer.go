@@ -2,18 +2,30 @@ package normalizer
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 
 	"xml2l/internal/graph"
 )
 
 // WriteProfiles normalizes all profiles in the graph and writes them to disk
 // concurrently. One goroutine per profile — no mutex required since each file
-// path is strictly isolated.
-func WriteProfiles(g NormalizeGraph) error {
+// path is strictly isolated. Progress goes to out and warnings to warn; the
+// return value counts the profiles written, so a caller can tell a partial run
+// from a complete one.
+func WriteProfiles(g NormalizeGraph, out, warn io.Writer) (int, error) {
+	if out == nil {
+		out = io.Discard
+	}
+
+	if warn == nil {
+		warn = io.Discard
+	}
+
 	profiles := g.Profiles()
 	maxWorkers := runtime.NumCPU()
 	if maxWorkers > len(profiles) {
@@ -23,7 +35,9 @@ func WriteProfiles(g NormalizeGraph) error {
 		maxWorkers = 1
 	}
 	sem := make(chan struct{}, maxWorkers)
-	unknown := newUnknownReport()
+	unknown := newUnknownReportTo(warn)
+
+	var written atomic.Int64
 
 	var wg sync.WaitGroup
 	errs := make(chan error, len(profiles))
@@ -53,7 +67,8 @@ func WriteProfiles(g NormalizeGraph) error {
 			if err := writeFileAtomic(profile.SourcePath, xmlBytes); err != nil {
 				errs <- fmt.Errorf("Write %s: %w", profile.SourcePath, err)
 			} else {
-				fmt.Fprintf(os.Stderr, "Normalized: %s\n", profile.Name)
+				written.Add(1)
+				fmt.Fprintf(out, "Normalized: %s\n", profile.Name)
 			}
 		}(p)
 	}
@@ -61,7 +76,7 @@ func WriteProfiles(g NormalizeGraph) error {
 	wg.Wait()
 	close(errs)
 
-	unknown.print(os.Stderr)
+	unknown.print(warn)
 
 	// Collect errors (report first error).
 	var firstErr error
@@ -69,10 +84,11 @@ func WriteProfiles(g NormalizeGraph) error {
 		if firstErr == nil {
 			firstErr = err
 		}
-		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+
+		fmt.Fprintf(out, "Warning: %v\n", err)
 	}
 
-	return firstErr
+	return int(written.Load()), firstErr
 }
 
 // writeFileAtomic writes data to path through a temporary file in the same

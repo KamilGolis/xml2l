@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,77 @@ func execute(t *testing.T, args ...string) (string, error) {
 	err := root.Execute()
 
 	return out.String(), err
+}
+
+const malformedProfile = `<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <classAccesses>
+`
+
+// TestSavePartialFailureExits68 covers a run that writes one profile and
+// cannot decode another: the good file must be saved, the failure named, and
+// the exit code must tell a script that the run was partial.
+func TestSavePartialFailureExits68(t *testing.T) {
+	dir := writeProject(t)
+	writeMetaFile(t, dir, "profiles/Bad.profile-meta.xml", malformedProfile)
+
+	out, err := execute(t, "profile", "save", "-p", dir)
+	if err == nil {
+		t.Fatalf("expected an error, got none:\n%s", out)
+	}
+
+	var exit *exitError
+	if !errors.As(err, &exit) {
+		t.Fatalf("want a coded exit error, got %T: %v", err, err)
+	}
+
+	if exit.code != 68 {
+		t.Errorf("exit code = %d, want 68", exit.code)
+	}
+
+	if !strings.Contains(out, "Bad.profile-meta.xml") {
+		t.Errorf("failure must name the profile:\n%s", out)
+	}
+
+	if _, statErr := os.Stat(filepath.Join(dir, "profiles", "Only.profile-meta.xml")); statErr != nil {
+		t.Errorf("the decodable profile must still be written: %v", statErr)
+	}
+}
+
+// TestSaveEmptyProjectFails keeps a wrong --path from reporting success: with
+// no profiles to write there is nothing to save.
+func TestSaveEmptyProjectFails(t *testing.T) {
+	dir := t.TempDir()
+
+	out, err := execute(t, "profile", "save", "-p", dir)
+	if err == nil {
+		t.Fatalf("expected an error, got none:\n%s", out)
+	}
+
+	if !strings.Contains(err.Error(), "no profiles found") {
+		t.Errorf("error = %v, want a no-profiles message", err)
+	}
+
+	if strings.Contains(out, "Done. Profiles saved.") {
+		t.Errorf("an empty run must not report success:\n%s", out)
+	}
+}
+
+// TestSaveTotalFailureIsNotPartial keeps 68 meaning "some work succeeded": a
+// run where nothing could be decoded is an ordinary failure.
+func TestSaveTotalFailureIsNotPartial(t *testing.T) {
+	dir := t.TempDir()
+	writeMetaFile(t, dir, "profiles/Bad.profile-meta.xml", malformedProfile)
+
+	_, err := execute(t, "profile", "save", "-p", dir)
+	if err == nil {
+		t.Fatal("expected an error, got none")
+	}
+
+	var exit *exitError
+	if errors.As(err, &exit) {
+		t.Errorf("total failure reported as partial with code %d", exit.code)
+	}
 }
 
 // writeProject creates a metadata directory with one profile.

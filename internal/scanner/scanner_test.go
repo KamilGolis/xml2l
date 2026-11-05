@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -29,7 +30,7 @@ func TestScanFindsClsAndFieldMeta(t *testing.T) {
 		}
 	}
 
-	gt, err := Scan(dir)
+	gt, err := Scan(dir, io.Discard)
 	if err != nil {
 		t.Fatalf("Scan failed: %v", err)
 	}
@@ -64,7 +65,7 @@ func TestScanExtensionDedup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gt, err := Scan(dir)
+	gt, err := Scan(dir, io.Discard)
 	if err != nil {
 		t.Fatalf("Scan failed: %v", err)
 	}
@@ -86,7 +87,7 @@ func TestScanExtensionDedup(t *testing.T) {
 func TestScanEmptyDirectory(t *testing.T) {
 	dir := t.TempDir()
 
-	gt, err := Scan(dir)
+	gt, err := Scan(dir, io.Discard)
 	if err != nil {
 		t.Fatalf("Scan failed: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestScanRootIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gt, err := Scan(dir)
+	gt, err := Scan(dir, io.Discard)
 	if err != nil {
 		t.Fatalf("Scan failed: %v", err)
 	}
